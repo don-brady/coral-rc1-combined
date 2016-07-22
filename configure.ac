@@ -248,6 +248,7 @@ AC_CONFIG_FILES([
 	tests/zfs-tests/tests/functional/largest_pool/Makefile
 	tests/zfs-tests/tests/functional/link_count/Makefile
 	tests/zfs-tests/tests/functional/libzfs/Makefile
+	tests/zfs-tests/tests/functional/metadata/Makefile
 	tests/zfs-tests/tests/functional/migration/Makefile
 	tests/zfs-tests/tests/functional/mmap/Makefile
 	tests/zfs-tests/tests/functional/mount/Makefile

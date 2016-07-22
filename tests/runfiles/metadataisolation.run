@@ -1,0 +1,28 @@
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+
+[DEFAULT]
+pre = setup
+quiet = False
+pre_user = root
+user = root
+timeout = 600
+post_user = root
+post = cleanup
+outputdir = /var/tmp/test_results
+
+[tests/functional/metadata]
+tests = ['md_001_pos', 'md_002_neg', 'md_003_pos',
+    'md_004_neg', 'md_005_pos', 'md_006_pos',
+    'md_007_pos', 'md_008_neg', #'md_009_neg',
+    'md_010_pos', 'md_011_pos', 'md_012_pos',
+    'md_013_pos', 'md_014_neg', 'md_015_pos',
+    'md_016_pos' ]

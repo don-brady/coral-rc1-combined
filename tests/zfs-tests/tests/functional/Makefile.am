@@ -26,6 +26,7 @@ SUBDIRS = \
 	largest_pool \
 	libzfs \
 	link_count \
+	metadata \
 	migration \
 	mmap \
 	mount \
