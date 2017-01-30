@@ -1071,8 +1071,8 @@ zio_vdev_child_io(zio_t *pio, blkptr_t *bp, vdev_t *vd, uint64_t offset,
 	enum zio_stage pipeline = ZIO_VDEV_CHILD_PIPELINE;
 	zio_t *zio;
 
-	ASSERT(vd->vdev_parent ==
-	    (pio->io_vd ? pio->io_vd : pio->io_spa->spa_root_vdev));
+	ASSERT((pio->io_vd != NULL && pio->io_vd->vdev_ops == &vdev_draid_spare_ops) ||
+	       vd->vdev_parent == (pio->io_vd ? pio->io_vd : pio->io_spa->spa_root_vdev));
 
 	if (type == ZIO_TYPE_READ && bp != NULL) {
 		/*
@@ -3258,14 +3258,14 @@ zio_vdev_io_start(zio_t *zio)
 	 */
 	if ((zio->io_flags & ZIO_FLAG_IO_REPAIR) &&
 	    !(zio->io_flags & ZIO_FLAG_SELF_HEAL) &&
-	    zio->io_txg != 0 &&	/* not a delegated i/o */
+	    zio->io_txg != 0 &&	0 && /* not a delegated i/o */
 	    !vdev_dtl_contains(vd, DTL_PARTIAL, zio->io_txg, 1)) {
 		ASSERT(zio->io_type == ZIO_TYPE_WRITE);
 		zio_vdev_io_bypass(zio);
 		return (ZIO_PIPELINE_CONTINUE);
 	}
 
-	if (vd->vdev_ops->vdev_op_leaf &&
+	if (vd->vdev_ops->vdev_op_leaf && vd->vdev_ops != &vdev_draid_spare_ops &&
 	    (zio->io_type == ZIO_TYPE_READ || zio->io_type == ZIO_TYPE_WRITE)) {
 
 		if (zio->io_type == ZIO_TYPE_READ && vdev_cache_read(zio))
@@ -3301,7 +3301,7 @@ zio_vdev_io_done(zio_t *zio)
 	if (zio->io_delay)
 		zio->io_delay = gethrtime() - zio->io_delay;
 
-	if (vd != NULL && vd->vdev_ops->vdev_op_leaf) {
+	if (vd != NULL && vd->vdev_ops->vdev_op_leaf && vd->vdev_ops != &vdev_draid_spare_ops) {
 
 		vdev_queue_io_done(zio);
 

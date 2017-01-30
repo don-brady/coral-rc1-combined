@@ -61,6 +61,7 @@
 #include <sys/dktp/fdisk.h>
 #include <sys/efi_partition.h>
 #include <sys/vdev_impl.h>
+#include <sys/vdev_draid_impl.h>
 #include <blkid/blkid.h>
 #include "libzfs.h"
 #include "libzfs_impl.h"
@@ -862,7 +863,7 @@ refresh_config(libzfs_handle_t *hdl, nvlist_t *config)
 /*
  * Determine if the vdev id is a hole in the namespace.
  */
-boolean_t
+static boolean_t
 vdev_is_hole(uint64_t *hole_array, uint_t holes, uint_t id)
 {
 	int c;
@@ -876,6 +877,64 @@ vdev_is_hole(uint64_t *hole_array, uint_t holes, uint_t id)
 	return (B_FALSE);
 }
 
+nvlist_t *
+draidcfg_read_file(const char *path)
+{
+	int fd;
+	struct stat64 sb;
+	char *buf;
+	nvlist_t *config;
+
+	if ((fd = open(path, O_RDONLY)) < 0) {
+		(void) fprintf(stderr, "Cannot open '%s'\n", path);
+		return (NULL);
+	}
+
+	if (fstat64(fd, &sb) != 0) {
+		(void) fprintf(stderr, "Failed to stat '%s'\n", path);
+		close(fd);
+		return (NULL);
+	}
+
+	if (!S_ISREG(sb.st_mode)) {
+		(void) fprintf(stderr, "Not a regular file '%s'\n", path);
+		close(fd);
+		return (NULL);
+	}
+
+	if ((buf = malloc(sb.st_size)) == NULL) {
+		(void) fprintf(stderr, "Failed to allocate %llu bytes\n",
+		    (u_longlong_t)sb.st_size);
+		close(fd);
+		return (NULL);
+	}
+
+	if (read(fd, buf, sb.st_size) != sb.st_size) {
+		(void) fprintf(stderr, "Failed to read %llu bytes\n",
+		    (u_longlong_t)sb.st_size);
+		close(fd);
+		free(buf);
+		return (NULL);
+	}
+
+	(void) close(fd);
+
+	if (nvlist_unpack(buf, sb.st_size, &config, 0) != 0) {
+		(void) fprintf(stderr, "Failed to unpack nvlist\n");
+		free(buf);
+		return (NULL);
+	}
+
+	free(buf);
+
+	if (!vdev_draid_config_validate(NULL, config)) {
+		nvlist_free(config);
+		return (NULL);
+	}
+
+	return (config);
+}
+
 /*
  * Convert our list of pools into the definitive set of configurations.  We
  * start by picking the best config for each toplevel vdev.  Once that's done,
@@ -884,7 +943,7 @@ vdev_is_hole(uint64_t *hole_array, uint_t holes, uint_t id)
  * return to the user.
  */
 static nvlist_t *
-get_configs(libzfs_handle_t *hdl, pool_list_t *pl, boolean_t active_ok)
+get_configs(libzfs_handle_t *hdl, nvlist_t *draidcfg, pool_list_t *pl, boolean_t active_ok)
 {
 	pool_entry_t *pe;
 	vdev_entry_t *ve;
@@ -1034,6 +1093,7 @@ get_configs(libzfs_handle_t *hdl, pool_list_t *pl, boolean_t active_ok)
 			    ZPOOL_CONFIG_VDEV_TREE, &nvtop) == 0);
 			verify(nvlist_lookup_uint64(nvtop, ZPOOL_CONFIG_ID,
 			    &id) == 0);
+			vdev_draid_config_add(nvtop, draidcfg);
 
 			if (id >= children) {
 				nvlist_t **newchild;
@@ -1852,7 +1912,7 @@ zpool_default_import_path[DEFAULT_IMPORT_PATH_SIZE] = {
  * to import a specific pool.
  */
 static nvlist_t *
-zpool_find_import_impl(libzfs_handle_t *hdl, importargs_t *iarg)
+zpool_find_import_impl(libzfs_handle_t *hdl, nvlist_t *draidcfg, importargs_t *iarg)
 {
 	nvlist_t *ret = NULL;
 	pool_list_t pools = { 0 };
@@ -1962,7 +2022,7 @@ zpool_find_import_impl(libzfs_handle_t *hdl, importargs_t *iarg)
 	free(cache);
 	mutex_destroy(&lock);
 
-	ret = get_configs(hdl, &pools, iarg->can_be_active);
+	ret = get_configs(hdl, draidcfg, &pools, iarg->can_be_active);
 
 	for (pe = pools.pools; pe != NULL; pe = penext) {
 		penext = pe->pe_next;
@@ -1985,17 +2045,6 @@ zpool_find_import_impl(libzfs_handle_t *hdl, importargs_t *iarg)
 	}
 
 	return (ret);
-}
-
-nvlist_t *
-zpool_find_import(libzfs_handle_t *hdl, int argc, char **argv)
-{
-	importargs_t iarg = { 0 };
-
-	iarg.paths = argc;
-	iarg.path = argv;
-
-	return (zpool_find_import_impl(hdl, &iarg));
 }
 
 /*
@@ -2138,7 +2187,7 @@ name_or_guid_exists(zpool_handle_t *zhp, void *data)
 }
 
 nvlist_t *
-zpool_search_import(libzfs_handle_t *hdl, importargs_t *import)
+zpool_search_import(libzfs_handle_t *hdl, nvlist_t *draidcfg, importargs_t *import)
 {
 	verify(import->poolname == NULL || import->guid == 0);
 
@@ -2149,7 +2198,7 @@ zpool_search_import(libzfs_handle_t *hdl, importargs_t *import)
 		return (zpool_find_import_cached(hdl, import->cachefile,
 		    import->poolname, import->guid));
 
-	return (zpool_find_import_impl(hdl, import));
+	return (zpool_find_import_impl(hdl, draidcfg, import));
 }
 
 boolean_t

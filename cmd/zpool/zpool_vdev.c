@@ -84,6 +84,8 @@
 #include <blkid/blkid.h>
 #include "zpool_util.h"
 #include <sys/zfs_context.h>
+#include <sys/vdev_draid_impl.h>
+
 
 /*
  * For any given vdev specification, we can have multiple errors.  The
@@ -594,6 +596,7 @@ is_spare(nvlist_t *config, const char *path)
  *	/dev/xxx	Complete disk path
  *	/xxx		Full path to file
  *	xxx		Shorthand for <zfs_vdev_paths>/xxx
+ *	$draidxxx	dRAID spare, see VDEV_DRAID_SPARE_PATH_FMT
  */
 static nvlist_t *
 make_leaf_vdev(nvlist_t *props, const char *arg, uint64_t is_log)
@@ -636,6 +639,11 @@ make_leaf_vdev(nvlist_t *props, const char *arg, uint64_t is_log)
 
 		/* After whole disk check restore original passed path */
 		strlcpy(path, arg, sizeof (path));
+	} else if (arg[0] == VDEV_DRAID_SPARE_PATH_FMT[0]) {
+		ashift = 12;
+		wholedisk = B_TRUE;
+		strlcpy(path, arg, sizeof (path));
+		type = VDEV_TYPE_DRAID_SPARE;
 	} else {
 		err = is_shorthand_path(arg, path, sizeof (path),
 		    &statbuf, &wholedisk);
@@ -664,17 +672,19 @@ make_leaf_vdev(nvlist_t *props, const char *arg, uint64_t is_log)
 		}
 	}
 
-	/*
-	 * Determine whether this is a device or a file.
-	 */
-	if (wholedisk || S_ISBLK(statbuf.st_mode)) {
-		type = VDEV_TYPE_DISK;
-	} else if (S_ISREG(statbuf.st_mode)) {
-		type = VDEV_TYPE_FILE;
-	} else {
-		(void) fprintf(stderr, gettext("cannot use '%s': must be a "
-		    "block device or regular file\n"), path);
-		return (NULL);
+	if (type == NULL) {
+		/*
+		 * Determine whether this is a device or a file.
+		 */
+		if (wholedisk || S_ISBLK(statbuf.st_mode)) {
+			type = VDEV_TYPE_DISK;
+		} else if (S_ISREG(statbuf.st_mode)) {
+			type = VDEV_TYPE_FILE;
+		} else {
+			fprintf(stderr, gettext("cannot use '%s': must "
+			    "be a block device or regular file\n"), path);
+			return (NULL);
+		}
 	}
 
 	/*
@@ -829,7 +839,8 @@ get_replication(nvlist_t *nvroot, boolean_t fatal)
 			rep.zprl_type = type;
 			rep.zprl_children = 0;
 
-			if (strcmp(type, VDEV_TYPE_RAIDZ) == 0) {
+			if (strcmp(type, VDEV_TYPE_RAIDZ) == 0 ||
+			    strcmp(type, VDEV_TYPE_DRAID) == 0) {
 				verify(nvlist_lookup_uint64(nv,
 				    ZPOOL_CONFIG_NPARITY,
 				    &rep.zprl_parity) == 0);
@@ -1402,7 +1413,9 @@ is_device_in_use(nvlist_t *config, nvlist_t *nv, boolean_t force,
 static const char *
 is_grouping(const char *type, int *mindev, int *maxdev)
 {
-	if (strncmp(type, "raidz", 5) == 0) {
+	/* HH: should really use VDEV_TYPE_RAIDZ instead of "raidz" */
+	if (strncmp(type, "raidz", 5) == 0 ||
+	    strncmp(type, "draid", 5) == 0) {
 		const char *p = type + 5;
 		char *end;
 		long nparity;
@@ -1423,7 +1436,11 @@ is_grouping(const char *type, int *mindev, int *maxdev)
 			*mindev = nparity + 1;
 		if (maxdev != NULL)
 			*maxdev = 255;
-		return (VDEV_TYPE_RAIDZ);
+
+		if (strncmp(type, "raidz", 5) == 0)
+			return (VDEV_TYPE_RAIDZ);
+		else
+			return (VDEV_TYPE_DRAID);
 	}
 
 	if (maxdev != NULL)
@@ -1492,6 +1509,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 		if ((type = is_grouping(argv[0], &mindev, &maxdev)) != NULL) {
 			nvlist_t **child = NULL;
 			int c, children = 0;
+			nvlist_t *draidcfg = NULL;
 
 			if (strcmp(type, VDEV_TYPE_SPARE) == 0) {
 				if (spares != NULL) {
@@ -1548,6 +1566,28 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 			for (c = 1; c < argc; c++) {
 				if (is_grouping(argv[c], NULL, NULL) != NULL)
 					break;
+
+				if (strcmp(type, VDEV_TYPE_DRAID) == 0 &&
+				    strncmp(argv[c], "cfg=", 4) == 0) {
+					if (draidcfg == NULL) {
+						draidcfg = draidcfg_read_file(argv[c] + 4);
+						if (draidcfg != NULL)
+							continue;
+						(void) fprintf(stderr,
+							gettext("invalid draid configuration '%s'\n"), argv[c]);
+					} else {
+						(void) fprintf(stderr, gettext("dRAID config "
+						    "specified more than once: %s\n"), argv[c]);
+					}
+
+					for (c = 0; c < children - 1; c++)
+						nvlist_free(child[c]);
+					free(child);
+					if (draidcfg != NULL)
+						nvlist_free(draidcfg);
+					return (NULL);
+				}
+
 				children++;
 				child = realloc(child,
 				    children * sizeof (nvlist_t *));
@@ -1602,7 +1642,8 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				    type) == 0);
 				verify(nvlist_add_uint64(nv,
 				    ZPOOL_CONFIG_IS_LOG, is_log) == 0);
-				if (strcmp(type, VDEV_TYPE_RAIDZ) == 0) {
+				if (strcmp(type, VDEV_TYPE_RAIDZ) == 0 ||
+				    strcmp(type, VDEV_TYPE_DRAID) == 0) {
 					verify(nvlist_add_uint64(nv,
 					    ZPOOL_CONFIG_NPARITY,
 					    mindev - 1) == 0);
@@ -1614,6 +1655,16 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				for (c = 0; c < children; c++)
 					nvlist_free(child[c]);
 				free(child);
+
+				if (draidcfg != NULL) {
+					assert(strcmp(type, VDEV_TYPE_DRAID) == 0);
+
+					if (!vdev_draid_config_add(nv, draidcfg))
+						(void) fprintf(stderr, gettext("ignoring invalid draid config\n"));
+
+					nvlist_free(draidcfg);
+					draidcfg = NULL;
+				}
 			}
 		} else {
 			/*
