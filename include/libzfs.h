@@ -24,8 +24,8 @@
  * Copyright (c) 2011, 2015 by Delphix. All rights reserved.
  * Copyright (c) 2012, Joyent, Inc. All rights reserved.
  * Copyright (c) 2013 Steven Hartland. All rights reserved.
- * Copyright 2013 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2016, Intel Corporation.
+ * Copyright 2016 Nexenta Systems, Inc.
  */
 
 #ifndef	_LIBZFS_H
@@ -64,6 +64,10 @@ extern "C" {
  */
 #define	DISK_LABEL_WAIT		(30 * 1000)  /* 30 seconds */
 
+#define	IMPORT_ORDER_PREFERRED_1	1
+#define	IMPORT_ORDER_PREFERRED_2	2
+#define	IMPORT_ORDER_SCAN_OFFSET	10
+#define	IMPORT_ORDER_DEFAULT		100
 #define	DEFAULT_IMPORT_PATH_SIZE	9
 extern char *zpool_default_import_path[DEFAULT_IMPORT_PATH_SIZE];
 
@@ -233,6 +237,7 @@ extern void zpool_free_handles(libzfs_handle_t *);
  */
 typedef int (*zpool_iter_f)(zpool_handle_t *, void *);
 extern int zpool_iter(libzfs_handle_t *, zpool_iter_f, void *);
+extern boolean_t zpool_skip_pool(const char *);
 
 /*
  * Functions to create and destroy pools
@@ -281,6 +286,7 @@ extern int zpool_label_disk_wait(char *, int);
 extern int zpool_label_disk(libzfs_handle_t *, zpool_handle_t *, char *);
 
 int zfs_dev_is_dm(char *dev_name);
+int zfs_dev_is_whole_disk(char *dev_name);
 char *zfs_get_underlying_path(char *dev_name);
 char *zfs_get_enclosure_sysfs_path(char *dev_name);
 
@@ -444,6 +450,7 @@ extern void zfs_close(zfs_handle_t *);
 extern zfs_type_t zfs_get_type(const zfs_handle_t *);
 extern const char *zfs_get_name(const zfs_handle_t *);
 extern zpool_handle_t *zfs_get_pool_handle(const zfs_handle_t *);
+extern const char *zfs_get_pool_name(const zfs_handle_t *);
 
 /*
  * Property management functions.  Some functions are shared with the kernel,
@@ -728,6 +735,7 @@ extern boolean_t zfs_bookmark_exists(const char *path);
 extern int zfs_append_partition(char *path, size_t max_len);
 extern int zfs_resolve_shortname(const char *name, char *path, size_t pathlen);
 extern int zfs_strcmp_pathname(char *name, char *cmp_name, int wholedisk);
+extern int zfs_path_order(char *path, int *order);
 
 /*
  * Mount support functions.
@@ -758,14 +766,16 @@ extern int zfs_unshare_smb(zfs_handle_t *, const char *);
 extern int zfs_unshareall_nfs(zfs_handle_t *);
 extern int zfs_unshareall_smb(zfs_handle_t *);
 extern int zfs_unshareall_bypath(zfs_handle_t *, const char *);
+extern int zfs_unshareall_bytype(zfs_handle_t *, const char *, const char *);
 extern int zfs_unshareall(zfs_handle_t *);
 extern int zfs_deleg_share_nfs(libzfs_handle_t *, char *, char *, char *,
     void *, void *, int, zfs_share_op_t);
 
 enum zfs_nicenum_format {
 	ZFS_NICENUM_1024 = 0,
-	ZFS_NICENUM_TIME = 1,
-	ZFS_NICENUM_RAW = 2
+	ZFS_NICENUM_BYTES = 1,
+	ZFS_NICENUM_TIME = 2,
+	ZFS_NICENUM_RAW = 3
 };
 
 /*
@@ -777,6 +787,7 @@ extern void zfs_nicenum_format(uint64_t num, char *buf, size_t buflen,
 
 
 extern void zfs_nicetime(uint64_t, char *, size_t);
+extern void zfs_nicebytes(uint64_t, char *, size_t);
 extern int zfs_nicestrtonum(libzfs_handle_t *, const char *, uint64_t *);
 
 /*
@@ -784,8 +795,17 @@ extern int zfs_nicestrtonum(libzfs_handle_t *, const char *, uint64_t *);
  */
 #define	STDOUT_VERBOSE	0x01
 #define	STDERR_VERBOSE	0x02
+#define	NO_DEFAULT_PATH	0x04 /* Don't use $PATH to lookup the command */
 
 int libzfs_run_process(const char *, char **, int flags);
+int libzfs_run_process_get_stdout(const char *path, char *argv[], char *env[],
+    char **lines[], int *lines_cnt);
+int libzfs_run_process_get_stdout_nopath(const char *path, char *argv[],
+    char *env[], char **lines[], int *lines_cnt);
+
+void libzfs_free_str_array(char **strs, int count);
+
+int libzfs_envvar_is_set(char *envvar);
 
 /*
  * Given a device or file, determine if it is part of a pool.
@@ -832,6 +852,7 @@ extern int zpool_fru_set(zpool_handle_t *, uint64_t, const char *);
 extern boolean_t is_mpath_whole_disk(const char *);
 extern void update_vdev_config_dev_strs(nvlist_t *);
 extern char *zfs_strip_partition(char *);
+extern char *zfs_strip_partition_path(char *);
 
 #ifdef HAVE_LIBUDEV
 struct udev_device;

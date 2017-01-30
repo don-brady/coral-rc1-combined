@@ -265,6 +265,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+	fletcher_4_init();
 	send_stream = stdin;
 	while (read_hdr(drr, &zc)) {
 
@@ -429,8 +430,8 @@ main(int argc, char *argv[])
 				    drro->drr_bonuslen);
 			}
 			if (drro->drr_bonuslen > 0) {
-				(void) ssread(buf, P2ROUNDUP(drro->drr_bonuslen,
-				    8), &zc);
+				(void) ssread(buf,
+				    P2ROUNDUP(drro->drr_bonuslen, 8), &zc);
 				if (dump) {
 					print_block(buf,
 					    P2ROUNDUP(drro->drr_bonuslen, 8));
@@ -618,6 +619,7 @@ main(int argc, char *argv[])
 		pcksum = zc;
 	}
 	free(buf);
+	fletcher_4_fini();
 
 	/* Print final summary */
 

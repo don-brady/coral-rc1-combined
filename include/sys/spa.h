@@ -122,6 +122,17 @@ _NOTE(CONSTCOND) } while (0)
 #define	SPA_MAXBLOCKSIZE	(1ULL << SPA_MAXBLOCKSHIFT)
 
 /*
+ * Alignment Shift (ashift) is an immutable, internal top-level vdev property
+ * which can only be set at vdev creation time. Physical writes are always done
+ * according to it, which makes 2^ashift the smallest possible IO on a vdev.
+ *
+ * We currently allow values ranging from 512 bytes (2^9 = 512) to 64 KiB
+ * (2^16 = 65,536).
+ */
+#define	ASHIFT_MIN		9
+#define	ASHIFT_MAX		16
+
+/*
  * Size of block to hold the configuration data (a packed nvlist)
  */
 #define	SPA_CONFIG_BLOCKSIZE	(1ULL << 14)
@@ -416,15 +427,17 @@ _NOTE(CONSTCOND) } while (0)
 
 #define	BP_GET_FILL(bp) (BP_IS_EMBEDDED(bp) ? 1 : (bp)->blk_fill)
 
+#define	BP_IS_METADATA(bp)	\
+	(BP_GET_LEVEL(bp) > 0 || DMU_OT_IS_METADATA(BP_GET_TYPE(bp)))
+
 #define	BP_GET_ASIZE(bp)	\
 	(BP_IS_EMBEDDED(bp) ? 0 : \
 	DVA_GET_ASIZE(&(bp)->blk_dva[0]) + \
 	DVA_GET_ASIZE(&(bp)->blk_dva[1]) + \
 	DVA_GET_ASIZE(&(bp)->blk_dva[2]))
 
-#define	BP_GET_UCSIZE(bp) \
-	((BP_GET_LEVEL(bp) > 0 || DMU_OT_IS_METADATA(BP_GET_TYPE(bp))) ? \
-	BP_GET_PSIZE(bp) : BP_GET_LSIZE(bp))
+#define	BP_GET_UCSIZE(bp)	\
+	(BP_IS_METADATA(bp) ? BP_GET_PSIZE(bp) : BP_GET_LSIZE(bp))
 
 #define	BP_GET_NDVAS(bp)	\
 	(BP_IS_EMBEDDED(bp) ? 0 : \
@@ -569,8 +582,7 @@ _NOTE(CONSTCOND) } while (0)
 }
 
 #define	BP_GET_BUFC_TYPE(bp)						\
-	(((BP_GET_LEVEL(bp) > 0) || (DMU_OT_IS_METADATA(BP_GET_TYPE(bp)))) ? \
-	ARC_BUFC_METADATA : ARC_BUFC_DATA)
+	(BP_IS_METADATA(bp) ? ARC_BUFC_METADATA : ARC_BUFC_DATA)
 
 typedef enum spa_import_type {
 	SPA_IMPORT_EXISTING,
@@ -585,7 +597,6 @@ extern int spa_get_stats(const char *pool, nvlist_t **config, char *altroot,
     size_t buflen);
 extern int spa_create(const char *pool, nvlist_t *config, nvlist_t *props,
     nvlist_t *zplprops);
-extern int spa_import_rootpool(char *devpath, char *devid);
 extern int spa_import(char *pool, nvlist_t *config, nvlist_t *props,
     uint64_t flags);
 extern nvlist_t *spa_tryimport(nvlist_t *tryconfig);
@@ -725,6 +736,13 @@ typedef enum txg_state {
 	TXG_STATE_COMMITTED	= 5,
 } txg_state_t;
 
+typedef struct txg_stat {
+	vdev_stat_t		vs1;
+	vdev_stat_t		vs2;
+	uint64_t		txg;
+	uint64_t		ndirty;
+} txg_stat_t;
+
 extern void spa_stats_init(spa_t *spa);
 extern void spa_stats_destroy(spa_t *spa);
 extern void spa_read_history_add(spa_t *spa, const zbookmark_phys_t *zb,
@@ -732,8 +750,9 @@ extern void spa_read_history_add(spa_t *spa, const zbookmark_phys_t *zb,
 extern void spa_txg_history_add(spa_t *spa, uint64_t txg, hrtime_t birth_time);
 extern int spa_txg_history_set(spa_t *spa,  uint64_t txg,
     txg_state_t completed_state, hrtime_t completed_time);
-extern int spa_txg_history_set_io(spa_t *spa,  uint64_t txg, uint64_t nread,
-    uint64_t nwritten, uint64_t reads, uint64_t writes, uint64_t ndirty);
+extern txg_stat_t *spa_txg_history_init_io(spa_t *, uint64_t,
+    struct dsl_pool *);
+extern void spa_txg_history_fini_io(spa_t *, txg_stat_t *);
 extern void spa_tx_assign_add_nsecs(spa_t *spa, uint64_t nsecs);
 
 /* Pool configuration locks */
@@ -783,11 +802,12 @@ extern uint64_t spa_load_guid(spa_t *spa);
 extern uint64_t spa_last_synced_txg(spa_t *spa);
 extern uint64_t spa_first_txg(spa_t *spa);
 extern uint64_t spa_syncing_txg(spa_t *spa);
+extern uint64_t spa_final_dirty_txg(spa_t *spa);
 extern uint64_t spa_version(spa_t *spa);
 extern pool_state_t spa_state(spa_t *spa);
 extern spa_load_state_t spa_load_state(spa_t *spa);
 extern uint64_t spa_freeze_txg(spa_t *spa);
-extern uint64_t spa_get_asize(spa_t *spa, uint64_t lsize);
+extern uint64_t spa_get_worst_case_asize(spa_t *spa, uint64_t lsize);
 extern uint64_t spa_get_dspace(spa_t *spa);
 extern uint64_t spa_get_slop_space(spa_t *spa);
 extern void spa_update_dspace(spa_t *spa);

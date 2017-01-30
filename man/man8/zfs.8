@@ -22,7 +22,7 @@
 .\"
 .\" Copyright (c) 2009 Sun Microsystems, Inc. All Rights Reserved.
 .\" Copyright 2011 Joshua M. Clulow <josh@sysmgr.org>
-.\" Copyright (c) 2011, 2015 by Delphix. All rights reserved.
+.\" Copyright (c) 2011, 2016 by Delphix. All rights reserved.
 .\" Copyright (c) 2014, Joyent, Inc. All rights reserved.
 .\" Copyright 2012 Nexenta Systems, Inc. All Rights Reserved.
 .\" Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
@@ -107,7 +107,7 @@ zfs \- configures ZFS file systems
 
 .LP
 .nf
-+\fBzfs\fR \fBset\fR \fIproperty\fR=\fIvalue\fR... \fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR...
+\fBzfs\fR \fBset\fR \fIproperty\fR=\fIvalue\fR... \fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR...
 .fi
 
 .LP
@@ -118,7 +118,7 @@ zfs \- configures ZFS file systems
 
 .LP
 .nf
-\fBzfs\fR \fBinherit\fR [\fB-rS\fR] \fIproperty\fR \fIfilesystem\fR|\fIvolume|snapshot\fR ...
+\fBzfs\fR \fBinherit\fR [\fB-rS\fR] \fIproperty\fR \fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR ...
 .fi
 
 .LP
@@ -160,12 +160,12 @@ zfs \- configures ZFS file systems
 
 .LP
 .nf
-\fBzfs\fR \fBshare\fR \fB-a\fR | \fIfilesystem\fR
+\fBzfs\fR \fBshare\fR [\fBnfs\fR|\fBsmb\fR] \fB-a\fR | \fIfilesystem\fR
 .fi
 
 .LP
 .nf
-\fBzfs\fR \fBunshare\fR \fB-a\fR \fIfilesystem\fR|\fImountpoint\fR
+\fBzfs\fR \fBunshare\fR [\fBnfs\fR|\fBsmb\fR] \fB-a\fR | \fIfilesystem\fR|\fImountpoint\fR
 .fi
 
 .LP
@@ -175,12 +175,12 @@ zfs \- configures ZFS file systems
 
 .LP
 .nf
-\fBzfs\fR \fBsend\fR [\fB-DnPpRveLc\fR] [\fB-\fR[\fBiI\fR] \fIsnapshot\fR] \fIsnapshot\fR
+\fBzfs\fR \fBsend\fR [\fB-DnPpRveLc\fR] [\fB-\fR[\fBi\fR|\fBI\fR] \fIsnapshot\fR] \fIsnapshot\fR
 .fi
 
 .LP
 .nf
-\fBzfs\fR \fBsend\fR [\fB-Le\fR] [\fB-i \fIsnapshot\fR|\fIbookmark\fR]\fR \fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR
+\fBzfs\fR \fBsend\fR [\fB-Lec\fR] [\fB-i \fIsnapshot\fR|\fIbookmark\fR]\fR \fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR
 .fi
 
 .LP
@@ -267,7 +267,7 @@ zfs \- configures ZFS file systems
 
 .LP
 .nf
-\fBzfs\fR \fBdiff\fR [\fB-FHt\fR] \fIsnapshot\fR \fIsnapshot|filesystem\fR
+\fBzfs\fR \fBdiff\fR [\fB-FHt\fR] \fIsnapshot\fR \fIsnapshot\fR|\fIfilesystem\fR
 
 .SH DESCRIPTION
 .LP
@@ -603,9 +603,9 @@ The type of dataset: \fBfilesystem\fR, \fBvolume\fR, or \fBsnapshot\fR.
 .ad
 .sp .6
 .RS 4n
-The amount of space consumed by this dataset and all its descendents. This is the value that is checked against this dataset's quota and reservation. The space used does not include this dataset's reservation, but does take into account the reservations of any descendent datasets. The amount of space that a dataset consumes from its parent, as well as the amount of space that are freed if this dataset is recursively destroyed, is the greater of its space used and its reservation.
+The amount of space consumed by this dataset and all its descendents. This is the value that is checked against this dataset's quota and reservation. The space used does not include this dataset's reservation, but does take into account the reservations of any descendent datasets. The amount of space that a dataset consumes from its parent, as well as the amount of space that is freed if this dataset is recursively destroyed, is the greater of its space used and its reservation.
 .sp
-When snapshots (see the "Snapshots" section) are created, their space is initially shared between the snapshot and the file system, and possibly with previous snapshots. As the file system changes, space that was previously shared becomes unique to the snapshot, and counted in the snapshot's space used. Additionally, deleting snapshots can increase the amount of space unique to (and used by) other snapshots.
+The used space of a snapshot (see the "Snapshots" section) is space that is referenced exclusively by this snapshot. If this snapshot is destroyed, the amount of \fBused\fR space will be freed. Space that is shared by multiple snapshots isn't accounted for in this metric. When a snapshot is destroyed, space that was previously shared with this snapshot can become unique to snapshots adjacent to it, thus changing the used space of those snapshots. The used space of the latest snapshot can also be affected by changes in the file system. Note that the \fBused\fR space of a snapshot is a subset of the \fBwritten\fR space of the snapshot.
 .sp
 The amount of space used, available, or referenced does not take into account pending changes. Pending changes are generally accounted for within a few seconds. Committing a change to a disk using \fBfsync\fR(2) or \fBO_SYNC\fR (see \fBopen\fR(2)) does not necessarily guarantee that the space usage information is updated immediately.
 .RE
@@ -699,9 +699,10 @@ The \fBuserused@\fR... properties are not displayed by \fBzfs get all\fR. The us
 \fISID numeric ID\fR (for example, \fBS-1-123-456-789\fR)
 .RE
 .RE
-Files created on Linux always have POSIX owners.
-
 .RS 4n
+.sp
+Files created on Linux always have POSIX owners.
+.sp
 The \fBuserobjused\fR is similar to \fBuserused\fR but instead it counts the number of objects consumed by \fIuser\fR. This feature doesn't count the internal objects used by ZFS, therefore it may under count a few objects comparing with the results of third-party tool such as \fBdfs -i\fR.
 When the property \fBxattr=on\fR is set on a fileset, ZFS will create additional objects per-file to store extended attributes. These additional objects are reflected in the \fBuserobjused\fR value and are counted against the user's \fBuserobjquota\fR. When a filesystem is configured to use \fBxattr=sa\fR no additional internal objects are required.
 .RE
@@ -756,8 +757,8 @@ This property can also be referred to by its shortened column name, \fBvolblock\
 .ad
 .sp .6
 .RS 4n
-The amount of \fBreferenced\fR space written to this dataset since the
-previous snapshot.
+The amount of space \fBreferenced\fR by this dataset, that was written since the previous snapshot
+(i.e. that is not referenced by the previous snapshot).
 .RE
 
 .sp
@@ -1340,7 +1341,7 @@ Controls whether the file system is shared via \fBNFS\fR, and what options are u
 .sp
 .in +4
 .nf
-/usr/sbin/exportfs -i -o sec=sys,rw,no_subtree_check,no_root_squash,mountpoint *:<mountpoint of dataset>
+/usr/sbin/exportfs -i -o sec=sys,rw,crossmnt,no_subtree_check,no_root_squash,mountpoint *:<mountpoint of dataset>
 .fi
 .in -4
 .sp
@@ -1620,7 +1621,7 @@ User property names must contain a colon (\fB:\fR) character to distinguish them
 When making programmatic use of user properties, it is strongly suggested to use a reversed \fBDNS\fR domain name for the \fImodule\fR component of property names to reduce the chance that two independently-developed packages use the same property name for different purposes. For example, property names beginning with \fBcom.sun\fR. are reserved for definition by Oracle Corporation (which acquired Sun Microsystems).
 .sp
 .LP
-The values of user properties are arbitrary strings, are always inherited, and are never validated. All of the commands that operate on properties (\fBzfs list\fR, \fBzfs get\fR, \fBzfs set\fR, and so forth) can be used to manipulate both native properties and user properties. Use the \fBzfs inherit\fR command to clear a user property. If the property is not defined in any parent dataset, it is removed entirely. Property values are limited to 1024 characters.
+The values of user properties are arbitrary strings, are always inherited, and are never validated. All of the commands that operate on properties (\fBzfs list\fR, \fBzfs get\fR, \fBzfs set\fR, and so forth) can be used to manipulate both native properties and user properties. Use the \fBzfs inherit\fR command to clear a user property. If the property is not defined in any parent dataset, it is removed entirely. Property values are limited to 8192 bytes.
 .SS "ZFS Volumes as Swap"
 .LP
 \fBZFS\fR volumes may be used as Linux swap devices.  After creating the volume
@@ -2202,7 +2203,7 @@ A comma-separated list of types to display, where \fItype\fR is one of \fBfilesy
 .ne 2
 .na
 \fB\fBzfs set\fR \fIproperty\fR=\fIvalue\fR[ \fIproperty\fR=\fIvalue\fR]...
-\fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR ...\fR
+\fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR|\fIbookmark\fR ...\fR
 .ad
 .sp .6
 .RS 4n
@@ -2214,7 +2215,7 @@ can be set on snapshots. For more information, see the "User Properties" section
 
 .sp
 .ne 2
-\fB\fBzfs get\fR [\fB-r\fR|\fB-d\fR \fIdepth\fR] [\fB-Hp\fR] [\fB-o\fR \fIfield\fR[,...] [\fB-t\fR \fItype\fR[,...]] [\fB-s\fR \fIsource\fR[,...] "\fIall\fR" | \fIproperty\fR[,...] \fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR ...\fR
+\fB\fBzfs get\fR [\fB-r\fR|\fB-d\fR \fIdepth\fR] [\fB-Hp\fR] [\fB-o\fR \fIfield\fR[,...] [\fB-t\fR \fItype\fR[,...]] [\fB-s\fR \fIsource\fR[,...] "\fIall\fR" | \fIproperty\fR[,...] \fIfilesystem\fR|\fIvolume\fR|\fIsnapshot\fR ...\fR|\fIbookmark\fR ...\fR
 .ad
 .sp .6
 .RS 4n
@@ -2646,7 +2647,7 @@ Unmount the specified filesystem. The command can also be given a path to a \fBZ
 .sp
 .ne 2
 .na
-\fB\fBzfs share\fR \fB-a\fR | \fIfilesystem\fR\fR
+\fB\fBzfs share\fR [\fBnfs\fR|\fBsmb\fR] \fB-a\fR | \fIfilesystem\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2658,7 +2659,7 @@ Shares available \fBZFS\fR file systems.
 .ad
 .sp .6
 .RS 4n
-Share all available \fBZFS\fR file systems. Invoked automatically as part of the boot process.
+Share all available \fBZFS\fR file systems. Invoked automatically as part of the boot process. Additionally if one of \fBnfs\fR|\fBsmb\fR protocols is specified only share file systems whose \fBsharenfs\fR|\fBsharesmb\fR is set.
 .RE
 
 .sp
@@ -2676,11 +2677,11 @@ Share the specified filesystem according to the \fBsharenfs\fR and \fBsharesmb\f
 .sp
 .ne 2
 .na
-\fB\fBzfs unshare\fR \fB-a\fR | \fIfilesystem\fR|\fImountpoint\fR\fR
+\fB\fBzfs unshare\fR [\fBnfs\fR|\fBsmb\fR] \fB-a\fR | \fIfilesystem\fR|\fImountpoint\fR\fR
 .ad
 .sp .6
 .RS 4n
-Unshares currently shared \fBZFS\fR file systems. This is invoked automatically as part of the shutdown process.
+Unshares currently shared \fBZFS\fR file systems. This is invoked automatically as part of the shutdown process. Additionally if one of \fBnfs\fR|\fBsmb\fR is specified unshare only file systems currently shared by that protocol.
 .sp
 .ne 2
 .na
@@ -2724,7 +2725,7 @@ See \fBzpool-features\fR(5) for details on ZFS feature flags and the
 .sp
 .ne 2
 .na
-\fBzfs send\fR [\fB-DnPpRveLc\fR] [\fB-\fR[\fBiI\fR] \fIsnapshot\fR] \fIsnapshot\fR
+\fBzfs send\fR [\fB-DnPpRveLc\fR] [\fB-\fR[\fBi\fR|\fBI\fR] \fIsnapshot\fR] \fIsnapshot\fR
 .ad
 .sp .6
 .RS 4n
@@ -2754,7 +2755,7 @@ Generate a stream package that sends all intermediary snapshots from the first s
 .sp
 .ne 2
 .na
-\fB\fB-R\fR\fR
+\fB\fB-R\fR, \fB--replicate\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2766,7 +2767,7 @@ If the \fB-i\fR or \fB-I\fR flags are used in conjunction with the \fB-R\fR flag
 .sp
 .ne 2
 .na
-\fB\fB-D\fR\fR
+\fB\fB-D\fR, \fB--dedup\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2776,7 +2777,7 @@ Generate a deduplicated stream. Blocks which would have been sent multiple times
 .sp
 .ne 2
 .na
-\fB\fB-L\fR\fR
+\fB\fB-L\fR, \fB--large-block\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2791,7 +2792,7 @@ flags and the \fBlarge_blocks\fR feature.
 .sp
 .ne 2
 .na
-\fB\fB-e\fR\fR
+\fB\fB-e\fR, \fB--embed\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2824,7 +2825,7 @@ decompressed before sending so it can be split into smaller block sizes.
 .sp
 .ne 2
 .na
-\fB\fB-p\fR\fR
+\fB\fB-p\fR, \fB--props\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2834,7 +2835,7 @@ Include the dataset's properties in the stream.  This flag is implicit when -R i
 .sp
 .ne 2
 .na
-\fB\fB-n\fR\fR
+\fB\fB-n\fR, \fB--dryrun\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2848,7 +2849,7 @@ to standard output and the verbose output goes to standard error).
 .sp
 .ne 2
 .na
-\fB\fB-P\fR\fR
+\fB\fB-P\fR, \fB--parsable\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2858,7 +2859,7 @@ Print machine-parsable verbose information about the stream package generated.
 .sp
 .ne 2
 .na
-\fB\fB-v\fR\fR
+\fB\fB-v\fR, \fB--verbose\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2886,7 +2887,7 @@ name will be "--head--".
 .sp
 .ne 2
 .na
-\fB\fB-L\fR\fR
+\fB\fB-L\fR, \fB--large-block\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -2901,7 +2902,7 @@ flags and the \fBlarge_blocks\fR feature.
 .sp
 .ne 2
 .na
-\fB\fB-e\fR\fR
+\fB\fB-e\fR, \fB--embed\fR\fR
 .ad
 .sp .6
 .RS 4n
@@ -3341,7 +3342,7 @@ Recursively releases a hold with the given tag on the snapshots of all descenden
 .sp
 .ne 2
 .na
-\fB\fBzfs diff\fR [\fB-FHt\fR] \fIsnapshot\fR \fIsnapshot|filesystem\fR
+\fB\fBzfs diff\fR [\fB-FHt\fR] \fIsnapshot\fR \fIsnapshot\fR|\fIfilesystem\fR
 .ad
 .sp .6
 .RS 4n
@@ -3745,6 +3746,10 @@ The following commands show how to set \fBsharenfs\fR property options to enable
 .sp
 .LP
 If you are using \fBDNS\fR for host name resolution, specify the fully qualified hostname.
+
+.sp
+.LP
+If you want to access snapdir through NFS, be sure to add \fBcrossmnt\fR to the options.
 
 .LP
 \fBExample 17 \fRDelegating ZFS Administration Permissions on a ZFS Dataset

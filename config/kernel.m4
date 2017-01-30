@@ -4,7 +4,9 @@ dnl #
 AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 	ZFS_AC_KERNEL
 	ZFS_AC_SPL
+	ZFS_AC_QAT
 	ZFS_AC_TEST_MODULE
+	ZFS_AC_KERNEL_OBJTOOL
 	ZFS_AC_KERNEL_CONFIG
 	ZFS_AC_KERNEL_DECLARE_EVENT_CLASS
 	ZFS_AC_KERNEL_CURRENT_BIO_TAIL
@@ -30,6 +32,7 @@ AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 	ZFS_AC_KERNEL_BIO_END_IO_T_ARGS
 	ZFS_AC_KERNEL_BIO_RW_BARRIER
 	ZFS_AC_KERNEL_BIO_RW_DISCARD
+	ZFS_AC_KERNEL_BLK_QUEUE_BDI
 	ZFS_AC_KERNEL_BLK_QUEUE_FLUSH
 	ZFS_AC_KERNEL_BLK_QUEUE_MAX_HW_SECTORS
 	ZFS_AC_KERNEL_BLK_QUEUE_MAX_SEGMENTS
@@ -37,6 +40,8 @@ AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 	ZFS_AC_KERNEL_BLK_QUEUE_HAVE_BLK_PLUG
 	ZFS_AC_KERNEL_GET_DISK_RO
 	ZFS_AC_KERNEL_GET_GENDISK
+	ZFS_AC_KERNEL_HAVE_BIO_SET_OP_ATTRS
+	ZFS_AC_KERNEL_GENERIC_READLINK_GLOBAL
 	ZFS_AC_KERNEL_DISCARD_GRANULARITY
 	ZFS_AC_KERNEL_CONST_XATTR_HANDLER
 	ZFS_AC_KERNEL_XATTR_HANDLER_NAME
@@ -46,6 +51,7 @@ AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 	ZFS_AC_KERNEL_INODE_OWNER_OR_CAPABLE
 	ZFS_AC_KERNEL_POSIX_ACL_FROM_XATTR_USERNS
 	ZFS_AC_KERNEL_POSIX_ACL_RELEASE
+	ZFS_AC_KERNEL_SET_CACHED_ACL_USABLE
 	ZFS_AC_KERNEL_POSIX_ACL_CHMOD
 	ZFS_AC_KERNEL_POSIX_ACL_EQUIV_MODE_WANTS_UMODE_T
 	ZFS_AC_KERNEL_POSIX_ACL_VALID_WITH_NS
@@ -54,7 +60,10 @@ AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 	ZFS_AC_KERNEL_INODE_OPERATIONS_CHECK_ACL
 	ZFS_AC_KERNEL_INODE_OPERATIONS_CHECK_ACL_WITH_FLAGS
 	ZFS_AC_KERNEL_INODE_OPERATIONS_GET_ACL
-	ZFS_AC_KERNE_GET_ACL_HANDLE_CACHE
+	ZFS_AC_KERNEL_INODE_OPERATIONS_SET_ACL
+	ZFS_AC_KERNEL_INODE_OPERATIONS_GETATTR
+	ZFS_AC_KERNEL_INODE_SET_FLAGS
+	ZFS_AC_KERNEL_GET_ACL_HANDLE_CACHE
 	ZFS_AC_KERNEL_SHOW_OPTIONS
 	ZFS_AC_KERNEL_FILE_INODE
 	ZFS_AC_KERNEL_FILE_DENTRY
@@ -64,11 +73,13 @@ AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 	ZFS_AC_KERNEL_NR_CACHED_OBJECTS
 	ZFS_AC_KERNEL_FREE_CACHED_OBJECTS
 	ZFS_AC_KERNEL_FALLOCATE
+	ZFS_AC_KERNEL_AIO_FSYNC
 	ZFS_AC_KERNEL_MKDIR_UMODE_T
 	ZFS_AC_KERNEL_LOOKUP_NAMEIDATA
 	ZFS_AC_KERNEL_CREATE_NAMEIDATA
 	ZFS_AC_KERNEL_GET_LINK
 	ZFS_AC_KERNEL_PUT_LINK
+	ZFS_AC_KERNEL_TMPFILE
 	ZFS_AC_KERNEL_TRUNCATE_RANGE
 	ZFS_AC_KERNEL_AUTOMOUNT
 	ZFS_AC_KERNEL_ENCODE_FH_WITH_INODE
@@ -90,13 +101,14 @@ AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 	ZFS_AC_KERNEL_SHRINK_CONTROL_HAS_NID
 	ZFS_AC_KERNEL_S_INSTANCES_LIST_HEAD
 	ZFS_AC_KERNEL_S_D_OP
-	ZFS_AC_KERNEL_BDI_SETUP_AND_REGISTER
+	ZFS_AC_KERNEL_BDI
 	ZFS_AC_KERNEL_SET_NLINK
 	ZFS_AC_KERNEL_ELEVATOR_CHANGE
 	ZFS_AC_KERNEL_5ARG_SGET
 	ZFS_AC_KERNEL_LSEEK_EXECUTE
 	ZFS_AC_KERNEL_VFS_ITERATE
 	ZFS_AC_KERNEL_VFS_RW_ITERATE
+	ZFS_AC_KERNEL_GENERIC_WRITE_CHECKS
 	ZFS_AC_KERNEL_KMAP_ATOMIC_ARGS
 	ZFS_AC_KERNEL_FOLLOW_DOWN_ONE
 	ZFS_AC_KERNEL_MAKE_REQUEST_FN
@@ -115,6 +127,8 @@ AC_DEFUN([ZFS_AC_CONFIG_KERNEL], [
 
 	dnl # -Wall -fno-strict-aliasing -Wstrict-prototypes and other
 	dnl # compiler options are added by the kernel build system.
+	KERNELCPPFLAGS="$KERNELCPPFLAGS -std=gnu99"
+	KERNELCPPFLAGS="$KERNELCPPFLAGS -Wno-declaration-after-statement"
 	KERNELCPPFLAGS="$KERNELCPPFLAGS $NO_UNUSED_BUT_SET_VARIABLE"
 	KERNELCPPFLAGS="$KERNELCPPFLAGS $NO_BOOL_COMPARE"
 	KERNELCPPFLAGS="$KERNELCPPFLAGS -DHAVE_SPL -D_KERNEL"
@@ -455,6 +469,95 @@ AC_DEFUN([ZFS_AC_SPL], [
 
 	AC_MSG_RESULT([$SPL_SYMBOLS])
 	AC_SUBST(SPL_SYMBOLS)
+])
+
+dnl #
+dnl # Detect the QAT module to be built against
+dnl # QAT provides hardware acceleration for data compression:
+dnl # 	https://01.org/intel-quickassist-technology
+dnl # * Download and install QAT driver from the above link
+dnl # * Start QAT driver in your system:
+dnl # 	service qat_service start
+dnl # * Enable QAT in ZFS, e.g.:
+dnl # 	./configure --with-qat=<qat-driver-path>/QAT1.6
+dnl #	make
+dnl # * Set GZIP compression in ZFS dataset:
+dnl # 	zfs set compression = gzip <dataset>
+dnl # Then the data written to this ZFS pool is compressed
+dnl # by QAT accelerator automatically, and de-compressed by
+dnl # QAT when read from the pool.
+dnl # * Get QAT hardware statistics by:
+dnl #	cat /proc/icp_dh895xcc_dev/qat
+dnl # * To disable QAT:
+dnl # 	insmod zfs.ko zfs_qat_disable=1
+dnl #
+AC_DEFUN([ZFS_AC_QAT], [
+	AC_ARG_WITH([qat],
+		AS_HELP_STRING([--with-qat=PATH],
+		[Path to qat source]),
+		AS_IF([test "$withval" = "yes"],
+			AC_MSG_ERROR([--with-qat=PATH requires a PATH]),
+			[qatsrc="$withval"]))
+
+	AC_ARG_WITH([qat-obj],
+		AS_HELP_STRING([--with-qat-obj=PATH],
+		[Path to qat build objects]),
+		[qatbuild="$withval"])
+
+	AS_IF([test ! -z "${qatsrc}"], [
+		AC_MSG_CHECKING([qat source directory])
+		AC_MSG_RESULT([$qatsrc])
+		QAT_SRC="${qatsrc}/quickassist"
+		AS_IF([ test ! -e "$QAT_SRC/include/cpa.h"], [
+			AC_MSG_ERROR([
+		*** Please make sure the qat driver package is installed
+		*** and specify the location of the qat source with the
+		*** '--with-qat=PATH' option then try again. Failed to
+		*** find cpa.h in:
+		${QAT_SRC}/include])
+		])
+	])
+
+	AS_IF([test ! -z "${qatsrc}"], [
+		AC_MSG_CHECKING([qat build directory])
+		AS_IF([test -z "$qatbuild"], [
+			qatbuild="${qatsrc}/build"
+		])
+
+		AC_MSG_RESULT([$qatbuild])
+		QAT_OBJ=${qatbuild}
+		AS_IF([ ! test -e "$QAT_OBJ/icp_qa_al.ko"], [
+			AC_MSG_ERROR([
+		*** Please make sure the qat driver is installed then try again.
+		*** Failed to find icp_qa_al.ko in:
+		$QAT_OBJ])
+		])
+
+		AC_SUBST(QAT_SRC)
+		AC_SUBST(QAT_OBJ)
+
+		AC_DEFINE(HAVE_QAT, 1,
+		[qat is enabled and existed])
+	])
+
+	dnl #
+	dnl # Detect the name used for the QAT Module.symvers file.
+	dnl #
+	AS_IF([test ! -z "${qatsrc}"], [
+		AC_MSG_CHECKING([qat file for module symbols])
+		QAT_SYMBOLS=$QAT_SRC/lookaside/access_layer/src/Module.symvers
+
+		AS_IF([test -r $QAT_SYMBOLS], [
+			AC_MSG_RESULT([$QAT_SYMBOLS])
+			AC_SUBST(QAT_SYMBOLS)
+		],[
+                       AC_MSG_ERROR([
+			*** Please make sure the qat driver is installed then try again.
+			*** Failed to find Module.symvers in:
+			$QAT_SYMBOLS])
+			])
+		])
+	])
 ])
 
 dnl #

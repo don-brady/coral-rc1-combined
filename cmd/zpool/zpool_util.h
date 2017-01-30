@@ -32,6 +32,9 @@
 extern "C" {
 #endif
 
+/* Path to scripts you can run with "zpool status/iostat -c" */
+#define	ZPOOL_SCRIPTS_DIR SYSCONFDIR"/zfs/zpool.d"
+
 /*
  * Basic utility functions
  */
@@ -71,6 +74,49 @@ int pool_list_count(zpool_list_t *);
 void pool_list_remove(zpool_list_t *, zpool_handle_t *);
 
 libzfs_handle_t *g_zfs;
+
+
+typedef	struct vdev_cmd_data
+{
+	char **lines;	/* Array of lines of output, minus the column name */
+	int lines_cnt;	/* Number of lines in the array */
+
+	char **cols;	/* Array of column names */
+	int cols_cnt;	/* Number of column names */
+
+
+	char *path;	/* vdev path */
+	char *upath;	/* vdev underlying path */
+	char *pool;	/* Pool name */
+	char *cmd;	/* backpointer to cmd */
+	char *vdev_enc_sysfs_path;	/* enclosure sysfs path (if any) */
+} vdev_cmd_data_t;
+
+typedef struct vdev_cmd_data_list
+{
+	char *cmd;		/* Command to run */
+	unsigned int count;	/* Number of vdev_cmd_data items (vdevs) */
+
+	/* vars to whitelist only certain vdevs, if requested */
+	libzfs_handle_t *g_zfs;
+	char **vdev_names;
+	int vdev_names_count;
+	int cb_name_flags;
+
+	vdev_cmd_data_t *data;	/* Array of vdevs */
+
+	/* List of unique column names and widths */
+	char **uniq_cols;
+	int uniq_cols_cnt;
+	int *uniq_cols_width;
+
+} vdev_cmd_data_list_t;
+
+vdev_cmd_data_list_t *all_pools_for_each_vdev_run(int argc, char **argv,
+    char *cmd, libzfs_handle_t *g_zfs, char **vdev_names, int vdev_names_count,
+    int cb_name_flags);
+
+void free_vdev_cmd_data_list(vdev_cmd_data_list_t *vcdl);
 
 #ifdef	__cplusplus
 }

@@ -27,38 +27,49 @@ verify_runnable "both"
 TEST_SEND_FS=$TESTPOOL/send_large_dnode
 TEST_RECV_FS=$TESTPOOL/recv_large_dnode
 TEST_SNAP=$TEST_SEND_FS@ldnsnap
+TEST_SNAPINCR=$TEST_SEND_FS@ldnsnap_incr
 TEST_STREAM=$TESTDIR/ldnsnap
+TEST_STREAMINCR=$TESTDIR/ldnsnap_incr
 TEST_FILE=foo
-
+TEST_FILEINCR=bar
 
 function cleanup
 {
 	if datasetexists $TEST_SEND_FS ; then
-		log_must $ZFS destroy -r $TEST_SEND_FS
+		log_must zfs destroy -r $TEST_SEND_FS
 	fi
 
 	if datasetexists $TEST_RECV_FS ; then
-		log_must $ZFS destroy -r $TEST_RECV_FS
+		log_must zfs destroy -r $TEST_RECV_FS
 	fi
 
 	rm -f $TEST_STREAM
+	rm -f $TEST_STREAMINCR
 }
 
 log_onexit cleanup
 
 log_assert "zfs send stream with large dnodes accepted by new pool"
 
-log_must $ZFS create -o dnodesize=1k $TEST_SEND_FS
+log_must zfs create -o dnodesize=1k $TEST_SEND_FS
 log_must touch /$TEST_SEND_FS/$TEST_FILE
-log_must $ZFS umount $TEST_SEND_FS
-log_must $ZFS snap $TEST_SNAP
-log_must $ZFS send $TEST_SNAP > $TEST_STREAM
+log_must zfs snap $TEST_SNAP
+log_must zfs send $TEST_SNAP > $TEST_STREAM
+log_must rm -f /$TEST_SEND_FS/$TEST_FILE
+log_must touch /$TEST_SEND_FS/$TEST_FILEINCR
+log_must zfs snap $TEST_SNAPINCR
+log_must zfs send -i $TEST_SNAP $TEST_SNAPINCR > $TEST_STREAMINCR
 
-log_must eval "$ZFS recv $TEST_RECV_FS < $TEST_STREAM"
+log_must eval "zfs recv $TEST_RECV_FS < $TEST_STREAM"
 inode=$(ls -li /$TEST_RECV_FS/$TEST_FILE | awk '{print $1}')
-dnsize=$($ZDB -dddd $TEST_RECV_FS $inode | awk '/ZFS plain file/ {print $6}')
+dnsize=$(zdb -dddd $TEST_RECV_FS $inode | awk '/ZFS plain file/ {print $6}')
 if [[ "$dnsize" != "1K" ]]; then
 	log_fail "dnode size is $dnsize (expected 1K)"
 fi
+
+log_must eval "zfs recv -F $TEST_RECV_FS < $TEST_STREAMINCR"
+log_must diff -r /$TEST_SEND_FS /$TEST_RECV_FS
+log_must zfs umount $TEST_SEND_FS
+log_must zfs umount $TEST_RECV_FS
 
 log_pass

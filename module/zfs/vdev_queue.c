@@ -24,7 +24,7 @@
  */
 
 /*
- * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
+ * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  */
 
 #include <sys/zfs_context.h>
@@ -37,6 +37,7 @@
 #include <sys/spa.h>
 #include <sys/spa_impl.h>
 #include <sys/kstat.h>
+#include <sys/abd.h>
 
 /*
  * ZFS I/O Scheduler
@@ -147,7 +148,7 @@ uint32_t zfs_vdev_sync_write_min_active = 10;
 uint32_t zfs_vdev_sync_write_max_active = 10;
 uint32_t zfs_vdev_async_read_min_active = 1;
 uint32_t zfs_vdev_async_read_max_active = 3;
-uint32_t zfs_vdev_async_write_min_active = 1;
+uint32_t zfs_vdev_async_write_min_active = 2;
 uint32_t zfs_vdev_async_write_max_active = 10;
 uint32_t zfs_vdev_scrub_min_active = 1;
 uint32_t zfs_vdev_scrub_max_active = 2;
@@ -370,11 +371,11 @@ vdev_queue_init(vdev_t *vd)
 	avl_create(&vq->vq_active_tree, vdev_queue_offset_compare,
 	    sizeof (zio_t), offsetof(struct zio, io_queue_node));
 	avl_create(vdev_queue_type_tree(vq, ZIO_TYPE_READ),
-		vdev_queue_offset_compare, sizeof (zio_t),
-		offsetof(struct zio, io_offset_node));
+	    vdev_queue_offset_compare, sizeof (zio_t),
+	    offsetof(struct zio, io_offset_node));
 	avl_create(vdev_queue_type_tree(vq, ZIO_TYPE_WRITE),
-		vdev_queue_offset_compare, sizeof (zio_t),
-		offsetof(struct zio, io_offset_node));
+	    vdev_queue_offset_compare, sizeof (zio_t),
+	    offsetof(struct zio, io_offset_node));
 
 	for (p = 0; p < ZIO_PRIORITY_NUM_QUEUEABLE; p++) {
 		int (*compfn) (const void *, const void *);
@@ -389,7 +390,7 @@ vdev_queue_init(vdev_t *vd)
 		else
 			compfn = vdev_queue_offset_compare;
 		avl_create(vdev_queue_class_tree(vq, p), compfn,
-			sizeof (zio_t), offsetof(struct zio, io_queue_node));
+		    sizeof (zio_t), offsetof(struct zio, io_queue_node));
 	}
 
 	vq->vq_lastoffset = 0;
@@ -496,12 +497,12 @@ vdev_queue_agg_io_done(zio_t *aio)
 		zio_t *pio;
 		zio_link_t *zl = NULL;
 		while ((pio = zio_walk_parents(aio, &zl)) != NULL) {
-			bcopy((char *)aio->io_data + (pio->io_offset -
-			    aio->io_offset), pio->io_data, pio->io_size);
+			abd_copy_off(pio->io_abd, aio->io_abd,
+			    0, pio->io_offset - aio->io_offset, pio->io_size);
 		}
 	}
 
-	zio_buf_free(aio->io_data, aio->io_size);
+	abd_free(aio->io_abd);
 }
 
 /*
@@ -523,7 +524,7 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	boolean_t stretch = B_FALSE;
 	avl_tree_t *t = vdev_queue_type_tree(vq, zio->io_type);
 	enum zio_flag flags = zio->io_flags & ZIO_FLAG_AGG_INHERIT;
-	void *buf;
+	abd_t *abd;
 
 	limit = MAX(MIN(zfs_vdev_aggregation_limit,
 	    spa_maxblocksize(vq->vq_vdev->vdev_spa)), 0);
@@ -553,7 +554,7 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 
 	/*
 	 * Walk backwards through sufficiently contiguous I/Os
-	 * recording the last non-option I/O.
+	 * recording the last non-optional I/O.
 	 */
 	while ((dio = AVL_PREV(t, first)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
@@ -575,10 +576,14 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 
 	/*
 	 * Walk forward through sufficiently contiguous I/Os.
+	 * The aggregation limit does not apply to optional i/os, so that
+	 * we can issue contiguous writes even if they are larger than the
+	 * aggregation limit.
 	 */
 	while ((dio = AVL_NEXT(t, last)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
-	    IO_SPAN(first, dio) <= limit &&
+	    (IO_SPAN(first, dio) <= limit ||
+	    (dio->io_flags & ZIO_FLAG_OPTIONAL)) &&
 	    IO_GAP(last, dio) <= maxgap) {
 		last = dio;
 		if (!(last->io_flags & ZIO_FLAG_OPTIONAL))
@@ -609,10 +614,16 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	}
 
 	if (stretch) {
-		/* This may be a no-op. */
+		/*
+		 * We are going to include an optional io in our aggregated
+		 * span, thus closing the write gap.  Only mandatory i/os can
+		 * start aggregated spans, so make sure that the next i/o
+		 * after our span is mandatory.
+		 */
 		dio = AVL_NEXT(t, last);
 		dio->io_flags &= ~ZIO_FLAG_OPTIONAL;
 	} else {
+		/* do not include the optional i/o */
 		while (last != mandatory && last != first) {
 			ASSERT(last->io_flags & ZIO_FLAG_OPTIONAL);
 			last = AVL_PREV(t, last);
@@ -624,14 +635,13 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 		return (NULL);
 
 	size = IO_SPAN(first, last);
-	ASSERT3U(size, <=, limit);
 
-	buf = zio_buf_alloc_flags(size, KM_NOSLEEP);
-	if (buf == NULL)
+	abd = abd_alloc_for_io(size, B_TRUE);
+	if (abd == NULL)
 		return (NULL);
 
 	aio = zio_vdev_delegated_io(first->io_vd, first->io_offset,
-	    buf, size, first->io_type, zio->io_priority,
+	    abd, size, first->io_type, zio->io_priority,
 	    flags | ZIO_FLAG_DONT_CACHE | ZIO_FLAG_DONT_QUEUE,
 	    vdev_queue_agg_io_done, NULL);
 	aio->io_timestamp = first->io_timestamp;
@@ -644,12 +654,11 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 
 		if (dio->io_flags & ZIO_FLAG_NODATA) {
 			ASSERT3U(dio->io_type, ==, ZIO_TYPE_WRITE);
-			bzero((char *)aio->io_data + (dio->io_offset -
-			    aio->io_offset), dio->io_size);
+			abd_zero_off(aio->io_abd,
+			    dio->io_offset - aio->io_offset, dio->io_size);
 		} else if (dio->io_type == ZIO_TYPE_WRITE) {
-			bcopy(dio->io_data, (char *)aio->io_data +
-			    (dio->io_offset - aio->io_offset),
-			    dio->io_size);
+			abd_copy_off(aio->io_abd, dio->io_abd,
+			    dio->io_offset - aio->io_offset, 0, dio->io_size);
 		}
 
 		zio_add_child(dio, aio);

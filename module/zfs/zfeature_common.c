@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2011, 2015 by Delphix. All rights reserved.
  * Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
+ * Copyright (c) 2013, Joyent, Inc. All rights reserved.
  * Copyright (c) 2014, Nexenta Systems, Inc. All rights reserved.
  */
 
@@ -122,7 +123,8 @@ zfeature_lookup_name(const char *name, spa_feature_t *res)
 }
 
 boolean_t
-zfeature_depends_on(spa_feature_t fid, spa_feature_t check) {
+zfeature_depends_on(spa_feature_t fid, spa_feature_t check)
+{
 	zfeature_info_t *feature = &spa_feature_table[fid];
 	int i;
 
@@ -130,6 +132,18 @@ zfeature_depends_on(spa_feature_t fid, spa_feature_t check) {
 		if (feature->fi_depends[i] == check)
 			return (B_TRUE);
 	}
+	return (B_FALSE);
+}
+
+static boolean_t
+deps_contains_feature(const spa_feature_t *deps, const spa_feature_t feature)
+{
+	int i;
+
+	for (i = 0; deps[i] != SPA_FEATURE_NONE; i++)
+		if (deps[i] == feature)
+			return (B_TRUE);
+
 	return (B_FALSE);
 }
 
@@ -149,6 +163,9 @@ zfeature_register(spa_feature_t fid, const char *guid, const char *name,
 
 	if (deps == NULL)
 		deps = nodeps;
+
+	VERIFY(((flags & ZFEATURE_FLAG_PER_DATASET) == 0) ||
+	    (deps_contains_feature(deps, SPA_FEATURE_EXTENSIBLE_DATASET)));
 
 	feature->fi_feature = fid;
 	feature->fi_guid = guid;
@@ -175,6 +192,11 @@ zpool_feature_init(void)
 	    "org.illumos:lz4_compress", "lz4_compress",
 	    "LZ4 compression algorithm support.",
 	    ZFEATURE_FLAG_ACTIVATE_ON_ENABLE, NULL);
+
+	zfeature_register(SPA_FEATURE_MULTI_VDEV_CRASH_DUMP,
+	    "com.joyent:multi_vdev_crash_dump", "multi_vdev_crash_dump",
+	    "Crash dumps to multiple vdev pools.",
+	    0, NULL);
 
 	zfeature_register(SPA_FEATURE_SPACEMAP_HISTOGRAM,
 	    "com.delphix:spacemap_histogram", "spacemap_histogram",
@@ -217,8 +239,8 @@ zpool_feature_init(void)
 
 	{
 	static const spa_feature_t filesystem_limits_deps[] = {
-	    SPA_FEATURE_EXTENSIBLE_DATASET,
-	    SPA_FEATURE_NONE
+		SPA_FEATURE_EXTENSIBLE_DATASET,
+		SPA_FEATURE_NONE
 	};
 	zfeature_register(SPA_FEATURE_FS_SS_LIMIT,
 	    "com.joyent:filesystem_limits", "filesystem_limits",

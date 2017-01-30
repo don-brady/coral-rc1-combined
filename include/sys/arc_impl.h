@@ -54,7 +54,7 @@ extern "C" {
  * a DVA.  These are buffers that hold dirty block copies
  * before they are written to stable storage.  By definition,
  * they are "ref'd" and are considered part of arc_mru
- * that cannot be freed.  Generally, they will aquire a DVA
+ * that cannot be freed.  Generally, they will acquire a DVA
  * as they are written and migrate onto the arc_mru list.
  *
  * The ARC_l2c_only state is for buffers that are in the second
@@ -70,7 +70,7 @@ typedef struct arc_state {
 	/*
 	 * list of evictable buffers
 	 */
-	multilist_t arcs_list[ARC_BUFC_NUMTYPES];
+	multilist_t *arcs_list[ARC_BUFC_NUMTYPES];
 	/*
 	 * total amount of evictable data in this state
 	 */
@@ -166,7 +166,7 @@ typedef struct l1arc_buf_hdr {
 	refcount_t		b_refcnt;
 
 	arc_callback_t		*b_acb;
-	void			*b_pdata;
+	abd_t			*b_pabd;
 } l1arc_buf_hdr_t;
 
 typedef struct l2arc_dev {

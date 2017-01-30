@@ -53,6 +53,7 @@ extern "C" {
 typedef struct vdev_queue vdev_queue_t;
 typedef struct vdev_cache vdev_cache_t;
 typedef struct vdev_cache_entry vdev_cache_entry_t;
+struct abd;
 
 extern int zfs_vdev_queue_depth_pct;
 extern uint32_t zfs_vdev_async_write_max_active;
@@ -87,7 +88,7 @@ typedef const struct vdev_ops {
  * Virtual device properties
  */
 struct vdev_cache_entry {
-	char		*ve_data;
+	struct abd	*ve_abd;
 	uint64_t	ve_offset;
 	clock_t		ve_lastused;
 	avl_node_t	ve_offset_node;
@@ -228,6 +229,7 @@ struct vdev {
 	boolean_t	vdev_cant_write; /* vdev is failing all writes	*/
 	boolean_t	vdev_isspare;	/* was a hot spare		*/
 	boolean_t	vdev_isl2cache;	/* was a l2cache device		*/
+	boolean_t	vdev_copy_uberblocks;  /* post expand copy uberblocks */
 	vdev_queue_t	vdev_queue;	/* I/O deadline schedule queue	*/
 	vdev_cache_t	vdev_cache;	/* physical block cache		*/
 	spa_aux_vdev_t	*vdev_aux;	/* for l2cache and spares vdevs	*/
