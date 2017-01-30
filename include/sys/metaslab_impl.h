@@ -25,6 +25,7 @@
 
 /*
  * Copyright (c) 2011, 2016 by Delphix. All rights reserved.
+ * Copyright (c) 2017, Intel Corporation.
  */
 
 #ifndef _SYS_METASLAB_IMPL_H
@@ -160,6 +161,7 @@ struct metaslab_class {
 	 * updated the MOS config and the space has been added to the pool).
 	 */
 	uint64_t		mc_groups;
+	uint64_t		mc_partial_groups; /* from segregated vdevs */
 
 	/*
 	 * Toggle to enable/disable the allocation throttle.
@@ -221,6 +223,7 @@ struct metaslab_group {
 	taskq_t			*mg_taskq;
 	metaslab_group_t	*mg_prev;
 	metaslab_group_t	*mg_next;
+	uint64_t		mg_metaslab_cnt;	/* member metaslabs */
 
 	/*
 	 * Each metaslab group can handle mg_max_alloc_queue_depth allocations

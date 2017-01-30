@@ -550,3 +550,27 @@ space_map_alloc_delta(space_map_t *sm)
 	ASSERT(sm->sm_dbuf != NULL);
 	return (sm->sm_phys->smp_alloc - space_map_allocated(sm));
 }
+
+map_alloc_class_t
+space_map_get_alloc_class(space_map_t *sm)
+{
+	if (sm == NULL)
+		return (SM_ALLOC_CLASS_DEFAULT);
+
+	ASSERT(sm->sm_dbuf != NULL);
+
+	return (sm->sm_phys->smp_alloc_class_id);
+
+}
+
+void
+space_map_set_alloc_class(space_map_t *sm, map_alloc_class_t class)
+{
+	ASSERT(sm != NULL && sm->sm_dbuf != NULL);
+	ASSERT(class == SM_ALLOC_CLASS_DEFAULT ||
+	    class == SM_ALLOC_CLASS_METADATA ||
+	    class == SM_ALLOC_CLASS_LOG ||
+	    class == SM_ALLOC_CLASS_SMALLBLKS);
+
+	sm->sm_phys->smp_alloc_class_id = class;
+}

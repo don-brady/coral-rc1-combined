@@ -274,6 +274,26 @@ dump_history_offsets(objset_t *os, uint64_t object, void *data, size_t size)
 	    (u_longlong_t)shp->sh_records_lost);
 }
 
+/* ARGSUSED */
+static void
+dump_space_map_header(objset_t *os, uint64_t object, void *data, size_t size)
+{
+	space_map_phys_t *smp = data;
+
+	if (smp == NULL)
+		return;
+
+	(void) printf("\t\tsmp_object = %llu\n",
+	    (u_longlong_t)smp->smp_object);
+	(void) printf("\t\tsmp_objsize = %llu\n",
+	    (u_longlong_t)smp->smp_objsize);
+	(void) printf("\t\tsmp_alloc = %llu\n",
+	    (u_longlong_t)smp->smp_alloc);
+	if (smp->smp_alloc_class_id != 0)
+		(void) printf("\t\tsmp_alloc_class_id = 0x%llx\n",
+		    (u_longlong_t)smp->smp_alloc_class_id);
+}
+
 static void
 zdb_nicenum(uint64_t num, char *buf)
 {
@@ -775,13 +795,26 @@ dump_metaslab(metaslab_t *msp)
 	spa_t *spa = vd->vdev_spa;
 	space_map_t *sm = msp->ms_sm;
 	char freebuf[32];
+	const char *group = "";
+
+	/* segregated vdevs have multiple groups */
+	if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
+		if (msp->ms_group == vd->vdev_mg)
+			group = "normal";
+		else if (msp->ms_group == vd->vdev_log_mg)
+			group = "log data";
+		else if (msp->ms_group == vd->vdev_custom_mg)
+			group = spa->spa_segregate_smallblks ?
+			    "smallblk" : "metadata";
+	}
 
 	zdb_nicenum(msp->ms_size - space_map_allocated(sm), freebuf);
 
 	(void) printf(
-	    "\tmetaslab %6llu   offset %12llx   spacemap %6llu   free    %5s\n",
+	    "\tmetaslab %6llu   offset %12llx   spacemap %6llu   free   "
+	    "%5s%10s\n",
 	    (u_longlong_t)msp->ms_id, (u_longlong_t)msp->ms_start,
-	    (u_longlong_t)space_map_object(sm), freebuf);
+	    (u_longlong_t)space_map_object(sm), freebuf, group);
 
 	if (dump_opt['m'] > 2 && !dump_opt['L']) {
 		mutex_enter(&msp->ms_lock);
@@ -819,13 +852,27 @@ dump_metaslab(metaslab_t *msp)
 static void
 print_vdev_metaslab_header(vdev_t *vd)
 {
-	(void) printf("\tvdev %10llu\n\t%-10s%5llu   %-19s   %-15s   %-10s\n",
-	    (u_longlong_t)vd->vdev_id,
+	vdev_alloc_bias_t alloc_bias = vd->vdev_alloc_bias;
+	const char *bias_str;
+
+	bias_str = (alloc_bias == VDEV_BIAS_LOG || vd->vdev_islog) ?
+	    VDEV_ALLOC_BIAS_LOG :
+	    (alloc_bias == VDEV_BIAS_DEDUP) ? VDEV_ALLOC_BIAS_DEDUP :
+	    (alloc_bias == VDEV_BIAS_METADATA) ? VDEV_ALLOC_BIAS_METADATA :
+	    (alloc_bias == VDEV_BIAS_SMALLBLKS) ? VDEV_ALLOC_BIAS_SMALLBLKS :
+	    (alloc_bias == VDEV_BIAS_SEGREGATE) ? VDEV_ALLOC_BIAS_SEGREGATE :
+	    vd->vdev_islog ? "log" : "";
+
+	(void) printf("\tvdev %10llu   %s\n"
+	    "\t%-10s%5llu   %-19s   %-15s   %-12s  %-8s\n",
+	    (u_longlong_t)vd->vdev_id, bias_str,
 	    "metaslabs", (u_longlong_t)vd->vdev_ms_count,
-	    "offset", "spacemap", "free");
-	(void) printf("\t%15s   %19s   %15s   %10s\n",
+	    "offset", "spacemap", "free",
+	    (alloc_bias == VDEV_BIAS_SEGREGATE) ? "class" : "");
+	(void) printf("\t%15s   %19s   %15s   %12s  %8s\n",
 	    "---------------", "-------------------",
-	    "---------------", "-------------");
+	    "---------------", "------------",
+	    (alloc_bias == VDEV_BIAS_SEGREGATE) ? "--------" : "");
 }
 
 static void
@@ -1878,7 +1925,7 @@ static object_viewer_t *object_viewer[DMU_OT_NUMTYPES + 1] = {
 	dump_packed_nvlist,	/* packed nvlist size		*/
 	dump_none,		/* bpobj			*/
 	dump_bpobj,		/* bpobj header			*/
-	dump_none,		/* SPA space map header		*/
+	dump_space_map_header,	/* SPA space map header		*/
 	dump_none,		/* SPA space map		*/
 	dump_none,		/* ZIL intent log		*/
 	dump_dnode,		/* DMU dnode			*/
@@ -3166,9 +3213,11 @@ zdb_leak_init(spa_t *spa, zdb_cb_t *zcb)
 		for (c = 0; c < rvd->vdev_children; c++) {
 			vdev_t *vd = rvd->vdev_child[c];
 			ASSERTV(metaslab_group_t *mg = vd->vdev_mg);
+
 			for (m = 0; m < vd->vdev_ms_count; m++) {
 				metaslab_t *msp = vd->vdev_ms[m];
-				ASSERT3P(msp->ms_group, ==, mg);
+				ASSERT(msp->ms_group == mg ||
+				    vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE);
 				mutex_enter(&msp->ms_lock);
 				metaslab_unload(msp);
 
@@ -3225,9 +3274,11 @@ zdb_leak_fini(spa_t *spa)
 		for (c = 0; c < rvd->vdev_children; c++) {
 			vdev_t *vd = rvd->vdev_child[c];
 			ASSERTV(metaslab_group_t *mg = vd->vdev_mg);
+
 			for (m = 0; m < vd->vdev_ms_count; m++) {
 				metaslab_t *msp = vd->vdev_ms[m];
-				ASSERT3P(mg, ==, msp->ms_group);
+				ASSERT(mg == msp->ms_group ||
+				    vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE);
 				mutex_enter(&msp->ms_lock);
 
 				/*
@@ -3315,6 +3366,8 @@ dump_block_stats(spa_t *spa)
 		flags |= TRAVERSE_PREFETCH_DATA;
 
 	zcb.zcb_totalasize = metaslab_class_get_alloc(spa_normal_class(spa));
+	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_dedup_class(spa));
+	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_custom_class(spa));
 	zcb.zcb_start = zcb.zcb_lastprint = gethrtime();
 	zcb.zcb_haderrors |= traverse_pool(spa, 0, flags, zdb_blkptr_cb, &zcb);
 
@@ -3353,7 +3406,10 @@ dump_block_stats(spa_t *spa)
 	norm_alloc = metaslab_class_get_alloc(spa_normal_class(spa));
 	norm_space = metaslab_class_get_space(spa_normal_class(spa));
 
-	total_alloc = norm_alloc + metaslab_class_get_alloc(spa_log_class(spa));
+	total_alloc = norm_alloc +
+	    metaslab_class_get_alloc(spa_log_class(spa)) +
+	    metaslab_class_get_alloc(spa_dedup_class(spa)) +
+	    metaslab_class_get_alloc(spa_custom_class(spa));
 	total_found = tzb->zb_asize - zcb.zcb_dedup_asize;
 
 	if (total_found == total_alloc) {
@@ -3374,30 +3430,48 @@ dump_block_stats(spa_t *spa)
 		return (2);
 
 	(void) printf("\n");
-	(void) printf("\tbp count:      %10llu\n",
+	(void) printf("\t%-16s %14llu\n", "bp count:",
 	    (u_longlong_t)tzb->zb_count);
-	(void) printf("\tganged count:  %10llu\n",
+	(void) printf("\t%-16s %14llu\n", "ganged count:",
 	    (longlong_t)tzb->zb_gangs);
-	(void) printf("\tbp logical:    %10llu      avg: %6llu\n",
+	(void) printf("\t%-16s %14llu      avg: %6llu\n", "bp logical:",
 	    (u_longlong_t)tzb->zb_lsize,
 	    (u_longlong_t)(tzb->zb_lsize / tzb->zb_count));
-	(void) printf("\tbp physical:   %10llu      avg:"
-	    " %6llu     compression: %6.2f\n",
-	    (u_longlong_t)tzb->zb_psize,
+	(void) printf("\t%-16s %14llu      avg: %6llu     compression: %6.2f\n",
+	    "bp physical:", (u_longlong_t)tzb->zb_psize,
 	    (u_longlong_t)(tzb->zb_psize / tzb->zb_count),
 	    (double)tzb->zb_lsize / tzb->zb_psize);
-	(void) printf("\tbp allocated:  %10llu      avg:"
-	    " %6llu     compression: %6.2f\n",
-	    (u_longlong_t)tzb->zb_asize,
+	(void) printf("\t%-16s %14llu      avg: %6llu     compression: %6.2f\n",
+	    "bp allocated:", (u_longlong_t)tzb->zb_asize,
 	    (u_longlong_t)(tzb->zb_asize / tzb->zb_count),
 	    (double)tzb->zb_lsize / tzb->zb_asize);
-	(void) printf("\tbp deduped:    %10llu    ref>1:"
-	    " %6llu   deduplication: %6.2f\n",
-	    (u_longlong_t)zcb.zcb_dedup_asize,
+	(void) printf("\t%-16s %14llu    ref>1: %6llu   deduplication: %6.2f\n",
+	    "bp deduped:", (u_longlong_t)zcb.zcb_dedup_asize,
 	    (u_longlong_t)zcb.zcb_dedup_blocks,
 	    (double)zcb.zcb_dedup_asize / tzb->zb_asize + 1.0);
-	(void) printf("\tSPA allocated: %10llu     used: %5.2f%%\n",
+	(void) printf("\t%-16s %14llu     used: %5.2f%%\n", "Normal class:",
 	    (u_longlong_t)norm_alloc, 100.0 * norm_alloc / norm_space);
+	if (spa_dedup_class(spa)->mc_rotor != NULL) {
+		uint64_t alloc = metaslab_class_get_alloc(spa_dedup_class(spa));
+		uint64_t space = metaslab_class_get_space(spa_dedup_class(spa));
+
+		(void) printf("\t%-16s %14llu     used: %5.2f%%\n",
+		    "Dedup class:", (u_longlong_t)alloc, 100.0 * alloc / space);
+	}
+	if (spa_custom_class(spa)->mc_rotor != NULL) {
+		uint64_t alloc = metaslab_class_get_alloc(
+		    spa_custom_class(spa));
+		uint64_t space = metaslab_class_get_space(
+		    spa_custom_class(spa));
+		vdev_t *vd = spa_custom_class(spa)->mc_rotor->mg_vd;
+
+		(void) printf("\t%-16s %14llu     used: %5.2f%%\n",
+		    spa->spa_segregate_smallblks ? "SmallBlks Class:" :
+		    spa->spa_segregate_metadata ? "Metadata Class:" :
+		    (vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS) ?
+		    "SmallBlks Class:" : "Metadata Class:",
+		    (u_longlong_t)alloc, 100.0 * alloc / space);
+	}
 
 	for (i = 0; i < NUM_BP_EMBEDDED_TYPES; i++) {
 		if (zcb.zcb_embedded_blocks[i] == 0)
