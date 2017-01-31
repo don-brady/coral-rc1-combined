@@ -618,7 +618,6 @@ int draid_permutation_generate(struct vdev_draid_configuration *cfg)
 				perms[i * best_map->ndevs + j] = best_map->rows[i][j];
 
 		cfg->dcf_bases = nrows;
-		cfg->dcf_seed = best_seed;
 		cfg->dcf_base_perms = perms;
 
 		if (verbose > 1)

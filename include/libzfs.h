@@ -402,7 +402,7 @@ typedef struct importargs {
 	int scan : 1;		/* prefer scanning to libblkid cache    */
 } importargs_t;
 
-extern nvlist_t *zpool_search_import(libzfs_handle_t *, nvlist_t *, importargs_t *);
+extern nvlist_t *zpool_search_import(libzfs_handle_t *, importargs_t *);
 
 /* legacy pool search routines */
 extern nvlist_t *zpool_find_import_cached(libzfs_handle_t *, const char *,

@@ -500,8 +500,8 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 {
 	int i;
 	uint_t c;
-	uint64_t *perm = NULL;
-	uint64_t n, d, p, s, b, seed;
+	uint8_t *perm = NULL;
+	uint64_t n, d, p, s, b;
 
 	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_CHILDREN, &n) != 0) {
 #ifndef _KERNEL
@@ -510,6 +510,13 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 		return (B_FALSE);
 	}
 
+	if (n - 1 > VDEV_DRAID_U8_MAX) {
+#ifndef _KERNEL
+		fprintf(stderr, "%s configuration too invalid: %lu\n",
+		    ZPOOL_CONFIG_DRAIDCFG_CHILDREN, n);
+#endif
+		return (B_FALSE);
+	}
 	if (vd != NULL && n != vd->vdev_children)
 		return (B_FALSE);
 
@@ -544,13 +551,6 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 		return (B_FALSE);
 	}
 
-	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_SEED, &seed) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_SEED);
-#endif
-		return (B_FALSE);
-	}
-
 	if (n == 0 || d == 0 || p == 0 || s == 0 || b == 0) {
 #ifndef _KERNEL
 		fprintf(stderr, "Zero n/d/p/s/b\n");
@@ -572,7 +572,7 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 		return (B_FALSE);
 	}
 
-	if (nvlist_lookup_uint64_array(config, ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c) != 0) {
+	if (nvlist_lookup_uint8_array(config, ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c) != 0) {
 #ifndef _KERNEL
 		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_PERM);
 #endif
@@ -651,8 +651,11 @@ vdev_draid_config_create(vdev_t *vd)
 static char draid_zero_page[PAGE_SIZE];
 #endif
 
+	int i, j;
 	uint_t c;
-	uint64_t *perm = NULL;
+	uint64_t children;
+	uint8_t *perms = NULL;
+	uint64_t *base_perms;
 	nvlist_t *nvl = vd->vdev_cfg;
 	struct vdev_draid_configuration *cfg;
 
@@ -668,11 +671,13 @@ static char draid_zero_page[PAGE_SIZE];
 	cfg->dcf_spare = fnvlist_lookup_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_SPARE);
 	cfg->dcf_bases = fnvlist_lookup_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_BASE);
 
-	VERIFY0(nvlist_lookup_uint64_array(nvl, ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c));
+	VERIFY0(nvlist_lookup_uint8_array(nvl, ZPOOL_CONFIG_DRAIDCFG_PERM, &perms, &c));
 
-	/* HH todo: no need to copy the array, vd->vdev_cfg is always available */
-	cfg->dcf_base_perms = kmem_alloc(sizeof(uint64_t) * c, KM_SLEEP);
-	(void) memcpy((void *)cfg->dcf_base_perms, perm, sizeof(uint64_t) * c);
+	base_perms = kmem_alloc(sizeof(uint64_t) * c, KM_SLEEP);
+	for (i = 0, children = cfg->dcf_children; i < cfg->dcf_bases; i++)
+		for (j = 0; j < children; j++)
+			base_perms[i * children + j] = perms[i * children + j];
+	cfg->dcf_base_perms = base_perms;
 
 	ASSERT3U(1ULL << vd->vdev_top->vdev_ashift, <=, PAGE_SIZE);
 	cfg->dcf_zero_abd = abd_get_from_buf(draid_zero_page, PAGE_SIZE);

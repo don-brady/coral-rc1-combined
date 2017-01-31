@@ -943,7 +943,7 @@ draidcfg_read_file(const char *path)
  * return to the user.
  */
 static nvlist_t *
-get_configs(libzfs_handle_t *hdl, nvlist_t *draidcfg, pool_list_t *pl, boolean_t active_ok)
+get_configs(libzfs_handle_t *hdl, pool_list_t *pl, boolean_t active_ok)
 {
 	pool_entry_t *pe;
 	vdev_entry_t *ve;
@@ -1093,7 +1093,6 @@ get_configs(libzfs_handle_t *hdl, nvlist_t *draidcfg, pool_list_t *pl, boolean_t
 			    ZPOOL_CONFIG_VDEV_TREE, &nvtop) == 0);
 			verify(nvlist_lookup_uint64(nvtop, ZPOOL_CONFIG_ID,
 			    &id) == 0);
-			vdev_draid_config_add(nvtop, draidcfg);
 
 			if (id >= children) {
 				nvlist_t **newchild;
@@ -1912,7 +1911,7 @@ zpool_default_import_path[DEFAULT_IMPORT_PATH_SIZE] = {
  * to import a specific pool.
  */
 static nvlist_t *
-zpool_find_import_impl(libzfs_handle_t *hdl, nvlist_t *draidcfg, importargs_t *iarg)
+zpool_find_import_impl(libzfs_handle_t *hdl, importargs_t *iarg)
 {
 	nvlist_t *ret = NULL;
 	pool_list_t pools = { 0 };
@@ -2022,7 +2021,7 @@ zpool_find_import_impl(libzfs_handle_t *hdl, nvlist_t *draidcfg, importargs_t *i
 	free(cache);
 	mutex_destroy(&lock);
 
-	ret = get_configs(hdl, draidcfg, &pools, iarg->can_be_active);
+	ret = get_configs(hdl, &pools, iarg->can_be_active);
 
 	for (pe = pools.pools; pe != NULL; pe = penext) {
 		penext = pe->pe_next;
@@ -2187,7 +2186,7 @@ name_or_guid_exists(zpool_handle_t *zhp, void *data)
 }
 
 nvlist_t *
-zpool_search_import(libzfs_handle_t *hdl, nvlist_t *draidcfg, importargs_t *import)
+zpool_search_import(libzfs_handle_t *hdl, importargs_t *import)
 {
 	verify(import->poolname == NULL || import->guid == 0);
 
@@ -2198,7 +2197,7 @@ zpool_search_import(libzfs_handle_t *hdl, nvlist_t *draidcfg, importargs_t *impo
 		return (zpool_find_import_cached(hdl, import->cachefile,
 		    import->poolname, import->guid));
 
-	return (zpool_find_import_impl(hdl, draidcfg, import));
+	return (zpool_find_import_impl(hdl, import));
 }
 
 boolean_t

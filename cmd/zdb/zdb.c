@@ -4110,7 +4110,7 @@ pool_match(nvlist_t *cfg, char *tgt)
 }
 
 static char *
-find_zpool(char **target, nvlist_t **configp, nvlist_t *draidcfg, int dirc, char **dirv)
+find_zpool(char **target, nvlist_t **configp, int dirc, char **dirv)
 {
 	nvlist_t *pools;
 	nvlist_t *match = NULL;
@@ -4129,7 +4129,7 @@ find_zpool(char **target, nvlist_t **configp, nvlist_t *draidcfg, int dirc, char
 		*sepp = '\0';
 	}
 
-	pools = zpool_search_import(g_zfs, draidcfg, &args);
+	pools = zpool_search_import(g_zfs, &args);
 
 	if (pools != NULL) {
 		nvpair_t *elem = NULL;
@@ -4195,7 +4195,6 @@ main(int argc, char **argv)
 	int rewind = ZPOOL_NEVER_REWIND;
 	char *spa_config_path_env;
 	boolean_t target_is_spa = B_TRUE;
-	nvlist_t *draidcfg = NULL;
 
 	(void) setrlimit(RLIMIT_NOFILE, &rl);
 	(void) enable_extended_FILE_stdio(-1, -1);
@@ -4388,7 +4387,7 @@ main(int argc, char **argv)
 
 	if (dump_opt['e']) {
 		nvlist_t *cfg = NULL;
-		char *name = find_zpool(&target, &cfg, draidcfg, nsearch, searchdirs);
+		char *name = find_zpool(&target, &cfg, nsearch, searchdirs);
 
 		error = ENOENT;
 		if (name) {

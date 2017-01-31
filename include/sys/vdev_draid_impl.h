@@ -43,7 +43,6 @@ struct vdev_draid_configuration {
 	uint64_t dcf_children;
 	uint64_t dcf_bases;
 	abd_t *dcf_zero_abd;
-	uint64_t dcf_seed;
 	const uint64_t *dcf_base_perms;
 };
 
@@ -60,6 +59,9 @@ extern boolean_t vdev_draid_config_add(nvlist_t *, nvlist_t *);
 extern void vdev_draid_fix_skip_sectors(zio_t *);
 extern vdev_t *vdev_draid_spare_get_parent(vdev_t *);
 extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
+
+#define VDEV_DRAID_MAX_CHILDREN	255
+#define VDEV_DRAID_U8_MAX	((uint8_t) -1)
 
 #define VDEV_DRAID_SPARE_PATH_FMT "$"VDEV_TYPE_DRAID"%lu-%lu-s%lu"
 

@@ -1413,9 +1413,8 @@ is_device_in_use(nvlist_t *config, nvlist_t *nv, boolean_t force,
 static const char *
 is_grouping(const char *type, int *mindev, int *maxdev)
 {
-	/* HH: should really use VDEV_TYPE_RAIDZ instead of "raidz" */
-	if (strncmp(type, "raidz", 5) == 0 ||
-	    strncmp(type, "draid", 5) == 0) {
+	if (strncmp(type, VDEV_TYPE_RAIDZ, 5) == 0 ||
+	    strncmp(type, VDEV_TYPE_DRAID, 5) == 0) {
 		const char *p = type + 5;
 		char *end;
 		long nparity;
@@ -1435,9 +1434,9 @@ is_grouping(const char *type, int *mindev, int *maxdev)
 		if (mindev != NULL)
 			*mindev = nparity + 1;
 		if (maxdev != NULL)
-			*maxdev = 255;
+			*maxdev = VDEV_DRAID_MAX_CHILDREN;
 
-		if (strncmp(type, "raidz", 5) == 0)
+		if (strncmp(type, VDEV_TYPE_RAIDZ, 5) == 0)
 			return (VDEV_TYPE_RAIDZ);
 		else
 			return (VDEV_TYPE_DRAID);

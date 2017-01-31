@@ -34,8 +34,6 @@
 #include "draid_permutation.h"
 
 
-#define DRAIDCFG_SEED_NONE 0
-
 static struct vdev_draid_configuration *
 draidcfg_find(const uint64_t data, const uint64_t parity,
 	const uint64_t spare, const uint64_t children)
@@ -49,12 +47,12 @@ draidcfg_find(const uint64_t data, const uint64_t parity,
 	static const uint64_t bases41[1][41] = {{1, 25, 10, 4, 18, 40, 16, 31, 37, 23, 6, 27, 19, 24, 26, 35, 14, 22, 17, 15, 36, 39, 32, 21, 33, 5, 2, 9, 20, 8, 11, 29, 28, 3, 34, 30, 12, 13, 38, 7, 0,}};
 
 	static struct vdev_draid_configuration known_cfgs[6] = {
-		{ .dcf_data = 2, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 7, .dcf_bases = 1, .dcf_seed = DRAIDCFG_SEED_NONE, .dcf_base_perms = &bases7[0][0]},
-		{ .dcf_data = 4, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 11, .dcf_bases = 1, .dcf_seed = DRAIDCFG_SEED_NONE, .dcf_base_perms = &bases11[0][0]},
-		{ .dcf_data = 8, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 19, .dcf_bases = 1, .dcf_seed = DRAIDCFG_SEED_NONE, .dcf_base_perms = &bases19[0][0]},
-		{ .dcf_data = 8, .dcf_parity = 3, .dcf_spare = 1, .dcf_children = 23, .dcf_bases = 1, .dcf_seed = DRAIDCFG_SEED_NONE, .dcf_base_perms = &bases23[0][0]},
-		{ .dcf_data = 4, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 31, .dcf_bases = 1, .dcf_seed = DRAIDCFG_SEED_NONE, .dcf_base_perms = &bases31[0][0]},
-		{ .dcf_data = 8, .dcf_parity = 2, .dcf_spare = 1, .dcf_children = 41, .dcf_bases = 1, .dcf_seed = DRAIDCFG_SEED_NONE, .dcf_base_perms = &bases41[0][0]},
+		{ .dcf_data = 2, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 7, .dcf_bases = 1, .dcf_base_perms = &bases7[0][0]},
+		{ .dcf_data = 4, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 11, .dcf_bases = 1, .dcf_base_perms = &bases11[0][0]},
+		{ .dcf_data = 8, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 19, .dcf_bases = 1, .dcf_base_perms = &bases19[0][0]},
+		{ .dcf_data = 8, .dcf_parity = 3, .dcf_spare = 1, .dcf_children = 23, .dcf_bases = 1, .dcf_base_perms = &bases23[0][0]},
+		{ .dcf_data = 4, .dcf_parity = 1, .dcf_spare = 1, .dcf_children = 31, .dcf_bases = 1, .dcf_base_perms = &bases31[0][0]},
+		{ .dcf_data = 8, .dcf_parity = 2, .dcf_spare = 1, .dcf_children = 41, .dcf_bases = 1, .dcf_base_perms = &bases41[0][0]},
 	};
 
 	int i;
@@ -82,7 +80,6 @@ draidcfg_create(const uint64_t data, const uint64_t parity,
 	cfg->dcf_spare = spare;
 	cfg->dcf_children = children;
 
-	cfg->dcf_seed = 0;
 	cfg->dcf_bases = 0;
 	cfg->dcf_base_perms = NULL;
 	if (draid_permutation_generate(cfg) != 0) {
@@ -90,7 +87,6 @@ draidcfg_create(const uint64_t data, const uint64_t parity,
 		return (NULL);
 	}
 
-	assert(cfg->dcf_seed != DRAIDCFG_SEED_NONE);
 	assert(cfg->dcf_bases != 0);
 	assert(cfg->dcf_base_perms != NULL);
 	return (cfg);
@@ -115,6 +111,15 @@ draidcfg_create_file(const uint64_t data, const uint64_t parity,
 	boolean_t freecfg = B_FALSE;
 	struct vdev_draid_configuration *cfg;
 
+	ASSERT(children != 0);
+	ASSERT3U(children, <=, VDEV_DRAID_MAX_CHILDREN);
+
+	if (children - 1 > VDEV_DRAID_U8_MAX) {
+		fprintf(stderr, "Configuration for over %u children "
+		    "is not supported\n", VDEV_DRAID_U8_MAX + 1);
+		return (1);
+	}
+
 	cfg = draidcfg_find(data, parity, spare, children);
 	if (cfg == NULL) {
 		cfg = draidcfg_create(data, parity, spare, children);
@@ -138,10 +143,29 @@ draidcfg_create_file(const uint64_t data, const uint64_t parity,
 	fnvlist_add_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_PARITY, parity);
 	fnvlist_add_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_SPARE, spare);
 	fnvlist_add_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_CHILDREN, children);
-	fnvlist_add_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_SEED, cfg->dcf_seed);
 	fnvlist_add_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_BASE, cfg->dcf_bases);
-	fnvlist_add_uint64_array(nvl, ZPOOL_CONFIG_DRAIDCFG_PERM,
-			(uint64_t *)cfg->dcf_base_perms, children * cfg->dcf_bases);
+
+	if (children - 1 <= VDEV_DRAID_U8_MAX) {
+		int i, j;
+		uint8_t *val = calloc(children * cfg->dcf_bases, sizeof(*val));
+
+		for (i = 0; i < cfg->dcf_bases; i++) {
+			for (j = 0; j < children; j++) {
+				uint64_t c = cfg->dcf_base_perms[i * children + j];
+
+				ASSERT3U(c, <, children);
+				ASSERT3U(c, <=, VDEV_DRAID_U8_MAX);
+				val[i * children + j] = (uint8_t) c;
+			}
+		}
+
+		fnvlist_add_uint8_array(nvl, ZPOOL_CONFIG_DRAIDCFG_PERM,
+		    val, children * cfg->dcf_bases);
+		free(val);
+	} else {
+		ASSERT3U(children, ==, 0); /* not supported yet */
+	}
+
 	assert(vdev_draid_config_validate(NULL, nvl));
 
 	packed = fnvlist_pack_xdr(nvl, &len);
@@ -162,25 +186,20 @@ static void
 draidcfg_print(nvlist_t *config)
 {
 	uint_t c;
-	uint64_t *perm = NULL;
-	uint64_t n, d, p, s, b, i, seed;
+	uint8_t *perm = NULL;
+	uint64_t n, d, p, s, b, i;
 
 	n = fnvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_CHILDREN);
 	d = fnvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_DATA);
 	p = fnvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_PARITY);
 	s = fnvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_SPARE);
 	b = fnvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_BASE);
-	seed = fnvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_SEED);
 
 	printf("dRAID%lu vdev of %lu child drives: %lu x (%lu data + %lu parity) and %lu distributed spare\n",
 	       p, n, (n - s) / (d + p), d, p, s);
-	printf("Using %lu base permutation%s ", b, b > 1 ? "s" : "");
-	if (seed == DRAIDCFG_SEED_NONE)
-		printf("(no seed):\n");
-	else
-		printf("(seed %lx):\n", seed);
+	printf("Using %lu base permutation%s\n", b, b > 1 ? "s" : "");
 
-	VERIFY0(nvlist_lookup_uint64_array(config, ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c));
+	VERIFY0(nvlist_lookup_uint8_array(config, ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c));
 	ASSERT3U(c, ==, b * n);
 
 	for (i = 0; i < b; i++) {
@@ -188,7 +207,7 @@ draidcfg_print(nvlist_t *config)
 
 		printf("  ");
 		for (j = 0; j < n; j++)
-			printf("%*lu,", n > 99 ? 3 : 2, perm[i * n + j]);
+			printf("%*u,", n > 99 ? 3 : 2, perm[i * n + j]);
 		printf("\n");
 	}
 }

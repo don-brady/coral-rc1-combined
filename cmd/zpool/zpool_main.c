@@ -2184,25 +2184,13 @@ show_import(nvlist_t *config)
  * within the pool.
  */
 static int
-do_import(nvlist_t *config, nvlist_t *draidcfg, const char *newname, const char *mntopts,
+do_import(nvlist_t *config, const char *newname, const char *mntopts,
     nvlist_t *props, int flags)
 {
 	zpool_handle_t *zhp;
 	char *name;
 	uint64_t state;
 	uint64_t version;
-
-	if (draidcfg != NULL) {
-		nvlist_t *nvroot;
-		nvlist_t **children = NULL;
-		uint_t i, c = 0;
-
-		nvroot = fnvlist_lookup_nvlist(config, ZPOOL_CONFIG_VDEV_TREE);
-		verify(nvlist_lookup_nvlist_array(nvroot, ZPOOL_CONFIG_CHILDREN, &children, &c) == 0);
-
-		for (i = 0; i < c; i++)
-			vdev_draid_config_add(children[i], draidcfg);
-	}
 
 	verify(nvlist_lookup_string(config, ZPOOL_CONFIG_POOL_NAME,
 	    &name) == 0);
@@ -2309,8 +2297,6 @@ do_import(nvlist_t *config, nvlist_t *draidcfg, const char *newname, const char 
  *	 -s	Scan using the default search path, the libblkid cache will
  *	        not be consulted.
  *
- *       -y	Path to dRAID configuration file.
- *
  * The import command scans for pools to import, and import pools based on pool
  * name and GUID.  The pool can also be renamed as part of the import process.
  */
@@ -2334,7 +2320,6 @@ zpool_do_import(int argc, char **argv)
 	nvlist_t *found_config;
 	nvlist_t *policy = NULL;
 	nvlist_t *props = NULL;
-	nvlist_t *draidcfg = NULL;
 	boolean_t first;
 	int flags = ZFS_IMPORT_NORMAL;
 	uint32_t rewind_policy = ZPOOL_NO_REWIND;
@@ -2348,7 +2333,7 @@ zpool_do_import(int argc, char **argv)
 	char *endptr;
 
 	/* check options */
-	while ((c = getopt(argc, argv, ":aCc:d:DEfFmnNo:R:stT:VXy:")) != -1) {
+	while ((c = getopt(argc, argv, ":aCc:d:DEfFmnNo:R:stT:VX:")) != -1) {
 		switch (c) {
 		case 'a':
 			do_all = B_TRUE;
@@ -2397,15 +2382,6 @@ zpool_do_import(int argc, char **argv)
 			} else {
 				mntopts = optarg;
 			}
-			break;
-		case 'y':
-			/* HH todo: allow multiple draidcfg to be specified in case
-			 * there are multiple draid vdevs in the pool
-			 */
-			draidcfg = draidcfg_read_file(optarg);
-			if (draidcfg == NULL)
-				(void) fprintf(stderr,
-					gettext("invalid draid configuration '%s'\n"), optarg);
 			break;
 		case 'R':
 			if (add_prop_list(zpool_prop_to_name(
@@ -2576,7 +2552,7 @@ zpool_do_import(int argc, char **argv)
 	 * duration of the zpool_search_import() function.
 	 */
 	thread_init();
-	pools = zpool_search_import(g_zfs, draidcfg, &idata);
+	pools = zpool_search_import(g_zfs, &idata);
 	thread_fini();
 
 	if (pools != NULL && idata.exists &&
@@ -2644,7 +2620,7 @@ zpool_do_import(int argc, char **argv)
 				(void) printf("\n");
 
 			if (do_all) {
-				err |= do_import(config, draidcfg, NULL, mntopts,
+				err |= do_import(config, NULL, mntopts,
 				    props, flags);
 			} else {
 				show_import(config);
@@ -2693,7 +2669,7 @@ zpool_do_import(int argc, char **argv)
 			    "no such pool available\n"), argv[0]);
 			err = B_TRUE;
 		} else {
-			err |= do_import(found_config, draidcfg, argc == 1 ? NULL :
+			err |= do_import(found_config, argc == 1 ? NULL :
 			    argv[1], mntopts, props, flags);
 		}
 	}
@@ -2710,8 +2686,6 @@ error:
 	nvlist_free(props);
 	nvlist_free(pools);
 	nvlist_free(policy);
-	if (draidcfg != NULL)
-		nvlist_free(draidcfg);
 	if (searchdirs != NULL)
 		free(searchdirs);
 	if (envdup != NULL)

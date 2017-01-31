@@ -648,7 +648,6 @@ typedef struct zpool_rewind_policy {
 #define ZPOOL_CONFIG_DRAIDCFG_SPARE	"com.intel:draid_spare"
 #define ZPOOL_CONFIG_DRAIDCFG_BASE	"com.intel:draid_base"
 #define ZPOOL_CONFIG_DRAIDCFG_CHILDREN	"com.intel:draid_children"
-#define ZPOOL_CONFIG_DRAIDCFG_SEED	"com.intel:draid_seed"
 #define ZPOOL_CONFIG_DRAIDCFG_PERM	"com.intel:draid_perm"
 
 /*
