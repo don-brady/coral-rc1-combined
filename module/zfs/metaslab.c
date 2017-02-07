@@ -209,6 +209,17 @@ kmem_cache_t *metaslab_alloc_trace_cache;
 #endif
 
 /*
+ * Segregated VDEVs set aside a portion of their metaslabs for class allocations
+ */
+int zfs_segregated_metadata_percent = 5;
+
+int zfs_segregated_smallblks_percent = 15;
+
+int zfs_class_smallblk_limit = 32768;
+
+#define	MIN_CUSTOM_METASLABS    4
+
+/*
  * ==========================================================================
  * Metaslab classes
  * ==========================================================================
@@ -1424,8 +1435,10 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
     metaslab_t **msp)
 {
 	vdev_t *vd = mg->mg_vd;
-	objset_t *mos = vd->vdev_spa->spa_meta_objset;
+	spa_t *spa = vd->vdev_spa;
+	objset_t *mos = spa->spa_meta_objset;
 	metaslab_t *ms;
+	metaslab_class_t *custom_class = NULL, *log_class = NULL;
 	int error;
 
 	ms = kmem_zalloc(sizeof (metaslab_t), KM_SLEEP);
@@ -1434,6 +1447,11 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 	ms->ms_id = id;
 	ms->ms_start = id << vd->vdev_ms_shift;
 	ms->ms_size = 1ULL << vd->vdev_ms_shift;
+
+	if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
+		custom_class = spa_custom_class(spa);
+		log_class = spa_log_class(spa);
+	}
 
 	/*
 	 * We only open space map objects that already exist. All others
@@ -1452,15 +1470,46 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 
 		/* check for segregated vdev's persistent allocation class */
 		if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
-			spa_t *spa = vd->vdev_spa;
 			map_alloc_class_t alloc_class;
 
 			alloc_class = space_map_get_alloc_class(ms->ms_sm);
 			if (alloc_class == SM_ALLOC_CLASS_METADATA ||
 			    alloc_class == SM_ALLOC_CLASS_SMALLBLKS)
-				mg = vdev_get_mg(vd, spa_custom_class(spa));
+				mg = vdev_get_mg(vd, custom_class);
 			else if (alloc_class == SM_ALLOC_CLASS_LOG)
-				mg = vdev_get_mg(vd, spa_log_class(spa));
+				mg = vdev_get_mg(vd, log_class);
+		}
+
+	} else if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
+		metaslab_group_t *altmg;
+		/*
+		 * For segregated vdev, assign metaslabs using a
+		 * first found algorithm until the goal percentage
+		 * is reached.
+		 */
+		if (spa->spa_segregate_log &&
+		    (altmg = vdev_get_mg(vd, log_class)) != NULL &&
+		    avl_numnodes(&altmg->mg_metaslab_tree) == 0) {
+			/* Set aside one metaslab for log allocations */
+			mg = altmg;
+		} else if (spa->spa_segregate_metadata ||
+		    spa->spa_segregate_smallblks) {
+			uint64_t goal, percent = 0;
+
+			if (spa->spa_segregate_metadata)
+				percent += zfs_segregated_metadata_percent;
+			if (spa->spa_segregate_smallblks)
+				percent += zfs_segregated_smallblks_percent;
+
+			goal = MAX(MIN_CUSTOM_METASLABS,
+			    (vd->vdev_ms_count * percent) / 100);
+
+			if (goal > 0 &&
+			    (altmg = vdev_get_mg(vd, custom_class)) != NULL &&
+			    avl_numnodes(&altmg->mg_metaslab_tree) < goal) {
+				/* Set aside for metadata & small blocks */
+				mg = altmg;
+			}
 		}
 	}
 
@@ -2247,7 +2296,6 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	range_tree_t *alloctree = msp->ms_alloctree[txg & TXG_MASK];
 	dmu_tx_t *tx;
 	uint64_t object = space_map_object(msp->ms_sm);
-	boolean_t force_sm_object = B_FALSE;
 
 	ASSERT(!vd->vdev_ishole);
 
@@ -2262,15 +2310,6 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	ASSERT3P(alloctree, !=, NULL);
 	ASSERT3P(msp->ms_freeingtree, !=, NULL);
 	ASSERT3P(msp->ms_freedtree, !=, NULL);
-
-	/*
-	 * For segregated vdevs, the special groups are remembered
-	 * via the space map object. So we want an object to be
-	 * created even tought there might not be any allocations.
-	 */
-	if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE &&
-	    mg != vd->vdev_mg && msp->ms_sm == NULL)
-		force_sm_object = B_TRUE;
 
 	/*
 	 * Normally, we don't want to process a metaslab if there
@@ -2570,21 +2609,22 @@ metaslab_sync_reassess(metaslab_group_t *mg)
 	metaslab_group_preload(mg);
 }
 
-static uint64_t
-metaslab_distance(metaslab_t *msp, dva_t *dva)
+/*
+ * When writing a ditto block (i.e. more than one DVA for a given BP) on
+ * the same vdev as an existing DVA of this BP, then try to allocate it
+ * on a different metaslab than existing DVAs (i.e. a unique metaslab).
+ */
+static boolean_t
+metaslab_is_unique(metaslab_t *msp, dva_t *dva)
 {
-	uint64_t ms_shift = msp->ms_group->mg_vd->vdev_ms_shift;
-	uint64_t offset = DVA_GET_OFFSET(dva) >> ms_shift;
-	uint64_t start = msp->ms_id;
+	uint64_t dva_ms_id;
 
 	if (msp->ms_group->mg_vd->vdev_id != DVA_GET_VDEV(dva))
-		return (1ULL << 63);
+		return (B_TRUE);
 
-	if (offset < start)
-		return ((start - offset) << ms_shift);
-	if (offset > start)
-		return ((offset - start) << ms_shift);
-	return (0);
+	dva_ms_id = DVA_GET_OFFSET(dva) >> msp->ms_group->mg_vd->vdev_ms_shift;
+
+	return (msp->ms_id != dva_ms_id);
 }
 
 /*
@@ -2840,13 +2880,12 @@ metaslab_block_alloc(metaslab_t *msp, uint64_t size, uint64_t txg)
 
 static uint64_t
 metaslab_group_alloc_normal(metaslab_group_t *mg, zio_alloc_list_t *zal,
-    uint64_t asize, uint64_t txg, uint64_t min_distance, dva_t *dva, int d)
+    uint64_t asize, uint64_t txg, boolean_t want_unique, dva_t *dva, int d)
 {
 	metaslab_t *msp = NULL;
 	metaslab_t *search;
 	uint64_t offset = -1ULL;
 	uint64_t activation_weight;
-	uint64_t target_distance;
 	int i;
 
 	activation_weight = METASLAB_WEIGHT_PRIMARY;
@@ -2902,13 +2941,9 @@ metaslab_group_alloc_normal(metaslab_group_t *mg, zio_alloc_list_t *zal,
 			if (activation_weight == METASLAB_WEIGHT_PRIMARY)
 				break;
 
-			target_distance = min_distance +
-			    (space_map_allocated(msp->ms_sm) != 0 ? 0 :
-			    min_distance >> 1);
-
 			for (i = 0; i < d; i++) {
-				if (metaslab_distance(msp, &dva[i]) <
-				    target_distance)
+				if (!want_unique ||
+				    !metaslab_is_unique(msp, &dva[i]))
 					break;
 			}
 			if (i == d)
@@ -3035,13 +3070,13 @@ next:
 
 static uint64_t
 metaslab_group_alloc(metaslab_group_t *mg, zio_alloc_list_t *zal,
-    uint64_t asize, uint64_t txg, uint64_t min_distance, dva_t *dva, int d)
+    uint64_t asize, uint64_t txg, boolean_t want_unique, dva_t *dva, int d)
 {
 	uint64_t offset;
 	ASSERT(mg->mg_initialized);
 
 	offset = metaslab_group_alloc_normal(mg, zal, asize, txg,
-	    min_distance, dva, d);
+	    want_unique, dva, d);
 
 	mutex_enter(&mg->mg_lock);
 	if (offset == -1ULL) {
@@ -3067,14 +3102,6 @@ metaslab_group_alloc(metaslab_group_t *mg, zio_alloc_list_t *zal,
 	mutex_exit(&mg->mg_lock);
 	return (offset);
 }
-
-/*
- * If we have to write a ditto block (i.e. more than one DVA for a given BP)
- * on the same vdev as an existing DVA of this BP, then try to allocate it
- * at least (vdev_asize / (2 ^ ditto_same_vdev_distance_shift)) away from the
- * existing DVAs.
- */
-int ditto_same_vdev_distance_shift = 3;
 
 /*
  * Allocate a block for the specified i/o.
@@ -3164,8 +3191,7 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 top:
 	do {
 		boolean_t allocatable;
-		uint64_t offset;
-		uint64_t distance, asize;
+		uint64_t asize, offset;
 
 		ASSERT(mg->mg_activation_count == 1);
 		vd = mg->mg_vd;
@@ -3216,28 +3242,16 @@ top:
 
 		ASSERT(mg->mg_class == mc);
 
-		/*
-		 * If we don't need to try hard, then require that the
-		 * block be 1/8th of the device away from any other DVAs
-		 * in this BP.  If we are trying hard, allow any offset
-		 * to be used (distance=0).  If using segregated VDEVs
-		 * just use +2 distance.
-		 */
-		distance = 0;
-		if (!try_hard) {
-			if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE)
-				distance = 2 << vd->vdev_ms_shift;
-			else
-				distance = vd->vdev_asize >>
-				    ditto_same_vdev_distance_shift;
-			if (distance <= (1ULL << vd->vdev_ms_shift))
-				distance = 0;
-		}
-
 		asize = vdev_psize_to_asize(vd, psize);
 		ASSERT(P2PHASE(asize, 1ULL << vd->vdev_ashift) == 0);
 
-		offset = metaslab_group_alloc(mg, zal, asize, txg, distance,
+		/*
+		 * If we don't need to try hard, then require that the
+		 * block be on an different metaslab from any other DVAs
+		 * in this BP (unique=true).  If we are trying hard, then
+		 * allow any metaslab to be used (unique=false).
+		 */
+		offset = metaslab_group_alloc(mg, zal, asize, txg, !try_hard,
 		    dva, d);
 
 		if (offset != -1ULL) {
@@ -3719,4 +3733,22 @@ MODULE_PARM_DESC(zfs_metaslab_segment_weight_enabled,
 module_param(zfs_metaslab_switch_threshold, int, 0644);
 MODULE_PARM_DESC(zfs_metaslab_switch_threshold,
 	"segment-based metaslab selection maximum buckets before switching");
+
+module_param(zfs_segregated_metadata_percent, int, 0644);
+MODULE_PARM_DESC(zfs_segregated_metadata_percent,
+	"The percentage of a top-level vdev metaslabs to segregate for "
+	"metadata block allocations. This also requires that the pool's "
+	"segregate_metadata property be enabled");
+
+module_param(zfs_segregated_smallblks_percent, int, 0644);
+MODULE_PARM_DESC(zfs_segregated_smallblks_percent,
+	"The percentage of a top-level vdev metaslabs to segregate for "
+	"small block allocations. This also requires that the pool's "
+	"segregate_smallblks property be enabled");
+
+module_param(zfs_class_smallblk_limit, int, 0644);
+MODULE_PARM_DESC(zfs_class_smallblk_limit,
+	"The largest block size threshold for the small block allocation "
+	"class");
+
 #endif /* _KERNEL && HAVE_SPL */

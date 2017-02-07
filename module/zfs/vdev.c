@@ -57,16 +57,6 @@
 int metaslabs_per_vdev = 200;
 
 /*
- * Segregated VDEVs set aside 5% of their metaslabs for metadata allocations
- */
-int zfs_segregated_metadata_percent = 5;
-
-int zfs_segregated_smallblks_percent = 15;
-
-#define	MIN_CUSTOM_METASLABS	4
-#define	MIN_METASLABS_FOR_SEG	10
-
-/*
  * Virtual device management.
  */
 
@@ -1057,10 +1047,7 @@ vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 	uint64_t newc = vd->vdev_asize >> vd->vdev_ms_shift;
 	metaslab_t **mspp;
 	int error;
-
 	boolean_t expanding = (oldc != 0);
-	uint64_t metadata_ms_first, metadata_ms_last;
-	uint64_t log_ms_first, log_ms_last;
 
 	ASSERT(txg == 0 || spa_config_held(spa, SCL_ALLOC, RW_WRITER));
 
@@ -1093,39 +1080,6 @@ vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 	vd->vdev_ms = mspp;
 	vd->vdev_ms_count = newc;
 
-	metadata_ms_first = metadata_ms_last = UINT_MAX;
-	log_ms_first = log_ms_last = UINT_MAX;
-
-	/* Generate initial segregated vdev metadata metaslab groupings */
-	if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE &&
-	    txg != 0 && (newc - oldc) > MIN_METASLABS_FOR_SEG) {
-		/*
-		 * Set aside metaslabs for metadata and small block allocations
-		 */
-		if (spa->spa_segregate_metadata ||
-		    spa->spa_segregate_smallblks) {
-			uint64_t count, percent = 0;
-
-			if (spa->spa_segregate_metadata)
-				percent += zfs_segregated_metadata_percent;
-			if (spa->spa_segregate_smallblks)
-				percent += zfs_segregated_smallblks_percent;
-
-			count = MAX(MIN_CUSTOM_METASLABS,
-			    ((newc - oldc) * percent) / 100);
-			metadata_ms_first = oldc;
-			metadata_ms_last = metadata_ms_first + count - 1;
-		}
-
-		/*
-		 * Set aside one metaslab at the end for log allocations
-		 */
-		if (spa->spa_segregate_log) {
-			log_ms_first = newc - 1;
-			log_ms_last = log_ms_first;
-		}
-	}
-
 	for (m = oldc; m < newc; m++) {
 		uint64_t object = 0;
 		metaslab_group_t *mg = vd->vdev_mg;
@@ -1136,19 +1090,35 @@ vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 			    DMU_READ_PREFETCH);
 			if (error)
 				return (error);
-		}
 
-		/* Segregated vdevs will have multiple groups */
-		if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE && txg != 0) {
-			if (m >= metadata_ms_first && m <= metadata_ms_last)
-				mg = vd->vdev_custom_mg;
-			else if (m >= log_ms_first && m <= log_ms_last)
-				mg = vd->vdev_log_mg;
+			/*
+			 * Segregated vdevs only instantiate active metaslabs
+			 * in the first pass over the metaslab array.
+			 */
+			if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE &&
+			    !expanding && object == 0)
+				continue;
 		}
 
 		error = metaslab_init(mg, m, object, txg, &(vd->vdev_ms[m]));
 		if (error)
 			return (error);
+	}
+
+	/*
+	 * Segregated vdevs take a second pass which now has activation context
+	 */
+	if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE && !expanding) {
+		for (m = oldc; m < newc; m++) {
+			metaslab_group_t *mg = vd->vdev_mg;
+
+			if (vd->vdev_ms[m] != NULL)
+				continue;
+
+			error = metaslab_init(mg, m, 0, txg, &(vd->vdev_ms[m]));
+			if (error)
+				return (error);
+		}
 	}
 
 	if (txg == 0)

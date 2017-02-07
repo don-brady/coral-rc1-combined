@@ -1721,6 +1721,8 @@ spa_custom_class(spa_t *spa)
 	return (spa->spa_custom_class);
 }
 
+extern int zfs_class_smallblk_limit;
+
 /*
  * Locate an appropriate allocation class
  */
@@ -1745,10 +1747,7 @@ spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
 			return (spa_custom_class(spa));
 	}
 	if (spa->spa_segregate_smallblks) {
-		/* for now cap at 8 times the smallest leaf quantum */
-		uint64_t threshold = (1ULL << spa->spa_min_ashift) << 3;
-
-		if (size <= threshold &&
+		if (size <= zfs_class_smallblk_limit &&
 		    spa->spa_custom_class->mc_rotor != NULL) {
 			return (spa_custom_class(spa));
 		}
