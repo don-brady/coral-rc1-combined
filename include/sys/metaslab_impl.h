@@ -331,6 +331,11 @@ struct metaslab {
 	range_tree_t	*ms_freeingtree; /* to free this syncing txg */
 	range_tree_t	*ms_freedtree; /* already freed this syncing txg */
 	range_tree_t	*ms_defertree[TXG_DEFER_SIZE];
+	/* Track space by block categories (between syncs of SM header */
+	int64_t		ms_dedup_count[TXG_SIZE];
+	int64_t		ms_metadata_count[TXG_SIZE];
+	int64_t		ms_smallblks_count[TXG_SIZE];
+	uint64_t	ms_category_enabled_birth;
 
 	boolean_t	ms_condensing;	/* condensing? */
 	boolean_t	ms_condense_wanted;
@@ -370,6 +375,15 @@ struct metaslab {
 	avl_node_t	ms_group_node;	/* node in metaslab group tree	*/
 	txg_node_t	ms_txg_node;	/* per-txg dirty metaslab links	*/
 };
+
+typedef enum metaslab_block_category {
+	MS_CATEGORY_REGULAR,	/* regular file data */
+	MS_CATEGORY_LOG,	/* log data */
+	MS_CATEGORY_METADATA,	/* metadata */
+	MS_CATEGORY_DEDUP,	/* dedup block */
+	MS_CATEGORY_SMALL	/* small block */
+} metaslab_block_category_t;
+
 
 #ifdef	__cplusplus
 }

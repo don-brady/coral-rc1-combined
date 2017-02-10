@@ -283,15 +283,35 @@ dump_space_map_header(objset_t *os, uint64_t object, void *data, size_t size)
 	if (smp == NULL)
 		return;
 
-	(void) printf("\t\tsmp_object = %llu\n",
+	(void) printf("\n\t%14s:    %10llu\n", "smp_object",
 	    (u_longlong_t)smp->smp_object);
-	(void) printf("\t\tsmp_objsize = %llu\n",
+	(void) printf("\t%14s:    %10llu\n", "smp_objsize",
 	    (u_longlong_t)smp->smp_objsize);
-	(void) printf("\t\tsmp_alloc = %llu\n",
+	(void) printf("\t%14s:    %10llu\n", "smp_alloc",
 	    (u_longlong_t)smp->smp_alloc);
-	if (smp->smp_alloc_class_id != 0)
-		(void) printf("\t\tsmp_alloc_class_id = 0x%llx\n",
-		    (u_longlong_t)smp->smp_alloc_class_id);
+	if (smp->smp_alloc_info.enabled_birth != 0) {
+		uint64_t reg_alloc;
+
+		(void) printf("\t%14s:   \n", "smp_alloc_info");
+		(void) printf("\t%17s: %10llu\n", ".enabled_birth",
+		    (u_longlong_t)smp->smp_alloc_info.enabled_birth);
+		(void) printf("\t%17s: %10llu\n", ".metadata_alloc",
+		    (u_longlong_t)smp->smp_alloc_info.metadata_alloc);
+		(void) printf("\t%17s: %10llu\n", ".smallblks_alloc",
+		    (u_longlong_t)smp->smp_alloc_info.smallblks_alloc);
+		(void) printf("\t%17s: %10llu\n", ".dedup_alloc",
+		    (u_longlong_t)smp->smp_alloc_info.dedup_alloc);
+
+		reg_alloc = smp->smp_alloc;
+		reg_alloc -= smp->smp_alloc_info.metadata_alloc;
+		reg_alloc -= smp->smp_alloc_info.smallblks_alloc;
+		reg_alloc -= smp->smp_alloc_info.dedup_alloc;
+		(void) printf("\t%17s: %10llu (calc)\n", "generic_alloc",
+		    (u_longlong_t)reg_alloc);
+	}
+	if (smp->smp_alloc_info.alloc_bias != 0)
+		(void) printf("\t%17s: 0x%llx\n", ".alloc_bias",
+		    (u_longlong_t)smp->smp_alloc_info.alloc_bias);
 }
 
 static void
