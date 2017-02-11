@@ -57,6 +57,9 @@ extern uint64_t vdev_draid_get_groupsz(const vdev_t *, boolean_t);
 extern boolean_t vdev_draid_config_validate(const vdev_t *, nvlist_t *);
 extern boolean_t vdev_draid_config_add(nvlist_t *, nvlist_t *);
 extern void vdev_draid_fix_skip_sectors(zio_t *);
+extern boolean_t vdev_draid_readable(vdev_t *, uint64_t);
+extern boolean_t vdev_draid_is_dead(vdev_t *, uint64_t);
+extern boolean_t vdev_draid_missing(vdev_t *, uint64_t, uint64_t, uint64_t);
 extern vdev_t *vdev_draid_spare_get_parent(vdev_t *);
 extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
 
@@ -64,6 +67,30 @@ extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
 #define VDEV_DRAID_U8_MAX	((uint8_t) -1)
 
 #define VDEV_DRAID_SPARE_PATH_FMT "$"VDEV_TYPE_DRAID"%lu-%lu-s%lu"
+
+/* trace_printk is GPL only */
+#define DRAID_USE_TRACE_PRINTK
+
+#ifdef _KERNEL
+# define U64FMT "%llu"
+# ifdef DRAID_USE_TRACE_PRINTK
+#  define draid_print(fmt, ...) trace_printk(fmt, ##__VA_ARGS__)
+# else
+#  define draid_print(fmt, ...) printk(fmt, ##__VA_ARGS__)
+# endif
+#else
+# define U64FMT "%lu"
+# define draid_print(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#endif
+
+extern int draid_debug_lvl;
+extern void vdev_draid_debug_zio(zio_t *, boolean_t);
+
+#define draid_dbg(lvl, fmt, ...) \
+       do { \
+               if (draid_debug_lvl >= (lvl)) \
+                       draid_print(fmt, ##__VA_ARGS__); \
+       } while (0);
 
 
 #ifdef  __cplusplus

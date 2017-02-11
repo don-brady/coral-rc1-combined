@@ -150,7 +150,9 @@ spa_scan_thread(void *arg)
 	uint64_t msi;
 	int err;
 
-	/* HH: allows zpool to return from syscall quickly */
+	/* Wait for newvd's DTL to propagate upward when
+	 * spa_vdev_exit() calls vdev_dtl_reassess().
+	 */
 	txg_wait_synced(spa->spa_dsl_pool, sscan->ssa_dtl_max);
 
 	mutex_init(&lock, NULL, MUTEX_DEFAULT, NULL);
@@ -232,11 +234,9 @@ spa_scan_thread(void *arg)
 			range_tree_remove(allocd_segs, offset, length);
 			mutex_exit(&lock);
 
-#ifdef _KERNEL
-			trace_printk("MS (%llu at %lluK) segment: %lluK + %lluK\n",
-				     msp->ms_id, msp->ms_start >> 10,
-				     (offset - msp->ms_start) >> 10, length >> 10);
-#endif
+			draid_dbg(1, "MS ("U64FMT" at "U64FMT"K) segment: "U64FMT"K + "U64FMT"K\n",
+			    msp->ms_id, msp->ms_start >> 10,
+			    (offset - msp->ms_start) >> 10, length >> 10);
 
 			if (vd->vdev_ops == &vdev_mirror_ops) {
 				spa_scan_rebuild(pio, vd, offset, length);
@@ -262,11 +262,10 @@ spa_scan_thread(void *arg)
 					action = "Fixing";
 					spa_scan_rebuild(pio, vd, offset, chunksz);
 				}
-#ifdef _KERNEL
-				trace_printk("\t%s: %lluK + %lluK (%s)\n",
-					     action, offset >> 10, chunksz >> 10,
-					     mirror ? "mirrored" : "dRAID");
-#endif
+
+				draid_dbg(1, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
+				    action, offset >> 10, chunksz >> 10,
+				    mirror ? "mirrored" : "dRAID");
 
 				length -= chunksz;
 				offset += chunksz;

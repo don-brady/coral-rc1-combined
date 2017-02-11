@@ -2646,6 +2646,9 @@ top:
 	if (!vd->vdev_ops->vdev_op_leaf)
 		return (spa_vdev_state_exit(spa, NULL, ENOTSUP));
 
+	if (vd->vdev_ops == &vdev_draid_spare_ops)
+		return (spa_vdev_state_exit(spa, NULL, ENOTSUP));
+
 	tvd = vd->vdev_top;
 	mg = tvd->vdev_mg;
 	generation = spa->spa_config_generation + 1;
@@ -2814,6 +2817,15 @@ vdev_is_dead(vdev_t *vd)
 	 */
 	return (vd->vdev_state < VDEV_STATE_DEGRADED || vd->vdev_ishole ||
 	    vd->vdev_ops == &vdev_missing_ops);
+}
+
+boolean_t
+vdev_is_dead_at(vdev_t *vd, uint64_t zio_offset)
+{
+	if (vd->vdev_ops == &vdev_draid_spare_ops)
+		zio_offset -= VDEV_LABEL_START_SIZE;
+
+	return (vdev_draid_is_dead(vd, zio_offset));
 }
 
 boolean_t
@@ -3140,17 +3152,17 @@ vdev_stat_update(zio_t *zio, uint64_t psize)
 		return;
 
 	mutex_enter(&vd->vdev_stat_lock);
-	if (type == ZIO_TYPE_READ && !vdev_is_dead(vd)) {
+	if (type == ZIO_TYPE_READ && !vdev_is_dead_at(vd, zio->io_offset)) {
 		if (zio->io_error == ECKSUM)
 			vs->vs_checksum_errors++;
 		else
 			vs->vs_read_errors++;
 	}
-	if (type == ZIO_TYPE_WRITE && !vdev_is_dead(vd))
+	if (type == ZIO_TYPE_WRITE && !vdev_is_dead_at(vd, zio->io_offset))
 		vs->vs_write_errors++;
 	mutex_exit(&vd->vdev_stat_lock);
 
-	if (type == ZIO_TYPE_WRITE && txg != 0 &&
+	if (type == ZIO_TYPE_WRITE && vd->vdev_ops != &vdev_draid_spare_ops && txg != 0 &&
 	    (!(flags & ZIO_FLAG_IO_REPAIR) ||
 	     /* HH: todo proper rebuild IO error handling... */
 	    ((flags & ZIO_FLAG_SCAN_THREAD) && !spa->spa_dsl_pool->dp_scan->scn_is_sequential) ||

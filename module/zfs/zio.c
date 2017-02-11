@@ -3258,7 +3258,18 @@ zio_vdev_io_start(zio_t *zio)
 	 */
 	if ((zio->io_flags & ZIO_FLAG_IO_REPAIR) &&
 	    !(zio->io_flags & ZIO_FLAG_SELF_HEAL) &&
-	    zio->io_txg != 0 &&	0 && /* not a delegated i/o */
+	    zio->io_txg != 0 &&	/* not a delegated i/o */
+	    /*
+	     * Leaf DTL_PARTIAL can be empty when a legitimate write comes from
+	     * a dRAID spare vdev. For example, when a dRAID spare is first
+	     * used, its spare blocks need to be written to but the leaf vdev's
+	     * of such blocks can have empty DTL_PARTIAL.
+	     *
+	     * There seemed no clean way to allow such writes while bypassing
+	     * spurious ones. At this point, just avoid all bypassing for dRAID
+	     * for correctness.
+	     */
+	    vd->vdev_top->vdev_ops != &vdev_draid_ops &&
 	    !vdev_dtl_contains(vd, DTL_PARTIAL, zio->io_txg, 1)) {
 		ASSERT(zio->io_type == ZIO_TYPE_WRITE);
 		zio_vdev_io_bypass(zio);

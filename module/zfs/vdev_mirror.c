@@ -30,6 +30,7 @@
 #include <sys/zfs_context.h>
 #include <sys/spa.h>
 #include <sys/vdev_impl.h>
+#include <sys/vdev_draid_impl.h>
 #include <sys/zio.h>
 #include <sys/abd.h>
 #include <sys/fs/zfs.h>
@@ -309,6 +310,12 @@ vdev_mirror_preferred_child_randomize(zio_t *zio)
 	return (mm->mm_preferred[p]);
 }
 
+static boolean_t
+vdev_mirror_child_readable(mirror_child_t *mc)
+{
+	return (vdev_draid_readable(mc->mc_vd, mc->mc_offset));
+}
+
 /*
  * Try to find a vdev whose DTL doesn't contain the block we want to read
  * prefering vdevs based on determined load.
@@ -334,14 +341,15 @@ vdev_mirror_child_select(zio_t *zio)
 		if (mc->mc_tried || mc->mc_skipped)
 			continue;
 
-		if (mc->mc_vd == NULL || !vdev_readable(mc->mc_vd)) {
+		if (mc->mc_vd == NULL ||
+		    !vdev_mirror_child_readable(mc)) {
 			mc->mc_error = SET_ERROR(ENXIO);
 			mc->mc_tried = 1;	/* don't even try */
 			mc->mc_skipped = 1;
 			continue;
 		}
 
-		if (vdev_dtl_contains(mc->mc_vd, DTL_MISSING, txg, 1)) {
+		if (vdev_draid_missing(mc->mc_vd, mc->mc_offset, txg, 1)) {
 			mc->mc_error = SET_ERROR(ESTALE);
 			mc->mc_skipped = 1;
 			mc->mc_speculative = 1;
