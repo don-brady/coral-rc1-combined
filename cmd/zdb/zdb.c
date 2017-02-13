@@ -808,6 +808,51 @@ dump_metaslab_stats(metaslab_t *msp)
 	dump_histogram(rt->rt_histogram, RANGE_TREE_HISTOGRAM_SIZE, 0);
 }
 
+const char alloc_stars[] = "*********************************";
+
+static void
+dump_allocation_line(const char *name, uint64_t value, uint64_t total)
+{
+	if (dump_opt['P']) {
+		(void) printf("\t\t%11s: %10llu\n", name, (u_longlong_t)value);
+	} else {
+		int index, width = sizeof (alloc_stars) - 1;
+
+		index = width - ((width * value) / total);
+		(void) printf("\t\t%11s: %5.1f%%  %s\n", name,
+		    100.0 * value / total, &alloc_stars[index]);
+	}
+}
+
+static void
+dump_allocation_info(space_map_t *smp)
+{
+	struct sm_alloc_info *info = &smp->sm_phys->smp_alloc_info;
+	uint64_t total = space_map_allocated(smp);
+	uint64_t generic = total;
+	char number[32];
+
+	if (smp->sm_phys->smp_alloc_info.enabled_birth == 0 || total == 0)
+		return;
+
+	zdb_nicenum(total, number);
+
+	(void) printf("\n\tAllocation Summary:%*s%s allocated\n",
+	    dump_opt['P'] ? 7 : 10, "", number);
+
+	generic -= info->metadata_alloc;
+	dump_allocation_line("metadata", info->metadata_alloc, total);
+
+	generic -= info->smallblks_alloc;
+	dump_allocation_line("smallblks", info->smallblks_alloc, total);
+
+	generic -= info->dedup_alloc;
+	dump_allocation_line("dedup", info->dedup_alloc, total);
+
+	dump_allocation_line("generic", generic, total);
+	(void) printf("\n");
+}
+
 static void
 dump_metaslab(metaslab_t *msp)
 {
@@ -860,12 +905,25 @@ dump_metaslab(metaslab_t *msp)
 		    SPACE_MAP_HISTOGRAM_SIZE, sm->sm_shift);
 	}
 
+	if (dump_opt['m'] > 1 && sm != NULL &&
+	    spa_feature_is_active(spa, SPA_FEATURE_ALLOCATION_CLASSES)) {
+		/*
+		 * For particiating metaslabs, there is additional alloc info
+		 */
+		dump_allocation_info(sm);
+	}
+
 	if (dump_opt['d'] > 5 || dump_opt['m'] > 3) {
 		ASSERT(msp->ms_size == (1ULL << vd->vdev_ms_shift));
 
 		mutex_enter(&msp->ms_lock);
 		dump_spacemap(spa->spa_meta_objset, msp->ms_sm);
 		mutex_exit(&msp->ms_lock);
+	}
+	if (dump_opt['m'] > 1 && sm != NULL) {
+		(void) printf("\t%15s   %19s   %15s   %12s\n",
+		    "---------------", "-------------------",
+		    "---------------", "------------");
 	}
 }
 
