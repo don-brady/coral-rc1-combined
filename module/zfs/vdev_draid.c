@@ -1231,6 +1231,8 @@ vdev_draid_spare_read_config(vdev_t *vd)
 		}
 	}
 	fnvlist_add_uint64(nv, ZPOOL_CONFIG_GUID, guid);
+
+	/* HH: ZPOOL_CONFIG_UNSPARE and ZPOOL_CONFIG_RESILVER_TXG? */
 	return (nv);
 }
 

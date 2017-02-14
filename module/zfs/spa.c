@@ -5672,9 +5672,6 @@ spa_vdev_resilver_done_hunt(vdev_t *vd)
 		    vdev_dtl_empty(newvd, DTL_OUTAGE) &&
 		    !vdev_dtl_required(oldvd))
 			return (oldvd);
-
-		if (newvd->vdev_ops == &vdev_draid_spare_ops)
-			return (oldvd);
 	}
 
 	/*
@@ -5698,9 +5695,6 @@ spa_vdev_resilver_done_hunt(vdev_t *vd)
 		    vdev_dtl_empty(newvd, DTL_MISSING) &&
 		    vdev_dtl_empty(newvd, DTL_OUTAGE) &&
 		    !vdev_dtl_required(oldvd))
-			return (oldvd);
-
-		if (oldvd != NULL && newvd->vdev_ops == &vdev_draid_spare_ops)
 			return (oldvd);
 
 		/*
