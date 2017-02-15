@@ -3525,6 +3525,33 @@ vdev_space_update(vdev_t *vd, int64_t alloc_delta, int64_t defer_delta,
 }
 
 /*
+ * propogate metaslab block catagory changes to vdev state
+ */
+void
+vdev_catagory_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
+    int64_t metadata_space_delta, int64_t smallblks_alloc_delta,
+    int64_t smallblks_space_delta)
+{
+	vdev_t *rvd = vd->vdev_spa->spa_root_vdev;
+
+	ASSERT(vd == vd->vdev_top);
+
+	mutex_enter(&vd->vdev_stat_lock);
+	vd->vdev_stat.vs_alloc_metadata += metadata_alloc_delta;
+	vd->vdev_stat.vs_space_metadata += metadata_space_delta;
+	vd->vdev_stat.vs_alloc_smallblks += smallblks_alloc_delta;
+	vd->vdev_stat.vs_space_smallblks += smallblks_space_delta;
+	mutex_exit(&vd->vdev_stat_lock);
+
+	mutex_enter(&rvd->vdev_stat_lock);
+	rvd->vdev_stat.vs_alloc_metadata += metadata_alloc_delta;
+	rvd->vdev_stat.vs_space_metadata += metadata_space_delta;
+	rvd->vdev_stat.vs_alloc_smallblks += smallblks_alloc_delta;
+	rvd->vdev_stat.vs_space_smallblks += smallblks_space_delta;
+	mutex_exit(&rvd->vdev_stat_lock);
+}
+
+/*
  * Mark a top-level vdev's config as dirty, placing it on the dirty list
  * so that it will be written out next time the vdev configuration is synced.
  * If the root vdev is specified (vdev_top == NULL), dirty all top-level vdevs.

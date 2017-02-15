@@ -1487,6 +1487,12 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 		    ms->ms_sm->sm_phys->smp_alloc_info.enabled_birth != 0) {
 			ms->ms_category_enabled_birth =
 			    ms->ms_sm->sm_phys->smp_alloc_info.enabled_birth;
+
+			vdev_catagory_space_update(vd,
+			    ms->ms_sm->sm_phys->smp_alloc_info.metadata_alloc,
+			    0,
+			    ms->ms_sm->sm_phys->smp_alloc_info.smallblks_alloc,
+			    0);
 		}
 
 	} else if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
@@ -1541,6 +1547,22 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 		    (txg != 0) ? txg : spa_first_txg(spa);
 	}
 
+	if (mg == vdev_get_mg(vd, custom_class)) {
+		uint64_t p1 = spa->spa_segregate_metadata ?
+		    zfs_segregated_metadata_percent : 0;
+		uint64_t p2 = spa->spa_segregate_smallblks ?
+		    zfs_segregated_smallblks_percent : 0;
+
+		if (p1 || p2) {
+			uint64_t md_ratio = p1 * 100 / (p1 + p2);
+			uint64_t sb_ratio = p2 * 100 / (p1 + p2);
+
+			vdev_catagory_space_update(vd,
+			    0, (ms->ms_size * md_ratio) / 100,
+			    0, (ms->ms_size * sb_ratio) / 100);
+		}
+	}
+
 	/*
 	 * If we're opening an existing pool (txg == 0) or creating
 	 * a new one (txg == TXG_INITIAL), all space is available now.
@@ -1579,9 +1601,9 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 void
 metaslab_fini(metaslab_t *msp)
 {
-	int t;
-
 	metaslab_group_t *mg = msp->ms_group;
+	spa_t *spa = mg->mg_vd->vdev_spa;
+	int t;
 
 	metaslab_group_remove(mg, msp);
 
@@ -1589,6 +1611,28 @@ metaslab_fini(metaslab_t *msp)
 	VERIFY(msp->ms_group == NULL);
 	metaslab_space_update(mg->mg_vd, mg->mg_class,
 	    -space_map_allocated(msp->ms_sm), 0, -msp->ms_size);
+
+	if (msp->ms_sm != NULL && msp->ms_sm->sm_dbuf != NULL &&
+	    msp->ms_sm->sm_phys->smp_alloc_info.enabled_birth != 0) {
+		uint64_t md_ratio = 0, sb_ratio = 0;
+
+		if (mg == vdev_get_mg(mg->mg_vd, spa_custom_class(spa))) {
+			uint64_t p1 = spa->spa_segregate_metadata ?
+			    zfs_segregated_metadata_percent : 0;
+			uint64_t p2 = spa->spa_segregate_smallblks ?
+			    zfs_segregated_smallblks_percent : 0;
+
+			if (p1 || p2) {
+				md_ratio = p1 * 100 / (p1 + p2);
+				sb_ratio = p2 * 100 / (p1 + p2);
+			}
+		}
+		vdev_catagory_space_update(mg->mg_vd,
+		    -msp->ms_sm->sm_phys->smp_alloc_info.metadata_alloc,
+		    -(msp->ms_size * md_ratio / 100),
+		    -msp->ms_sm->sm_phys->smp_alloc_info.smallblks_alloc,
+		    -(msp->ms_size * sb_ratio / 100));
+	}
 	space_map_close(msp->ms_sm);
 
 	metaslab_unload(msp);
@@ -2399,9 +2443,9 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	metaslab_group_histogram_remove(mg, msp);
 
 	/*
-	 * Synchronize the allocation-by-type data into space map header,
-	 * which will be written as part of space_map_write(), and reset
-	 * counters for the next txg.
+	 * Synchronize the allocation-by-category data into space map
+	 * header, which will be written as part of space_map_write(),
+	 * and reset counters for the next txg sync pass.
 	 */
 	if (msp->ms_category_enabled_birth != 0) {
 		/* TBD -- need an API to activate and check birth time */
@@ -2413,6 +2457,11 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		    msp->ms_dedup_count[txg & TXG_MASK],
 		    msp->ms_metadata_count[txg & TXG_MASK],
 		    msp->ms_smallblks_count[txg & TXG_MASK]);
+
+		vdev_catagory_space_update(vd,
+		    msp->ms_metadata_count[txg & TXG_MASK], 0,
+		    msp->ms_smallblks_count[txg & TXG_MASK], 0);
+
 		msp->ms_dedup_count[txg & TXG_MASK] = 0;
 		msp->ms_metadata_count[txg & TXG_MASK] = 0;
 		msp->ms_smallblks_count[txg & TXG_MASK] = 0;
@@ -2912,7 +2961,7 @@ metaslab_block_category(const blkptr_t *bp)
 }
 
 static void
-metaslab_block_track(metaslab_t *msp, uint64_t size,
+metaslab_block_track(metaslab_t *msp, int64_t size,
     metaslab_block_category_t blkcat, uint64_t birth, uint64_t txg)
 {
 	uint64_t enabled_birth;

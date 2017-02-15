@@ -560,6 +560,11 @@ space_map_sync_block_allocations(space_map_t *sm, int64_t dedup_delta,
 	sm->sm_phys->smp_alloc_info.dedup_alloc += dedup_delta;
 	sm->sm_phys->smp_alloc_info.metadata_alloc += metadata_delta;
 	sm->sm_phys->smp_alloc_info.smallblks_alloc += smallblks_delta;
+
+	/* check for undeflow */
+	ASSERT0(sm->sm_phys->smp_alloc_info.dedup_alloc & (1ULL<<63));
+	ASSERT0(sm->sm_phys->smp_alloc_info.metadata_alloc & (1ULL<<63));
+	ASSERT0(sm->sm_phys->smp_alloc_info.smallblks_alloc & (1ULL<<63));
 }
 
 map_alloc_bias_t

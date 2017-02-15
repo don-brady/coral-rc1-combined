@@ -324,7 +324,7 @@ get_usage(zpool_help_t idx)
 	case HELP_LABELCLEAR:
 		return (gettext("\tlabelclear [-f] <vdev>\n"));
 	case HELP_LIST:
-		return (gettext("\tlist [-gHLpPv] [-o property[,...]] "
+		return (gettext("\tlist [-CgHLpPv] [-o property[,...]] "
 		    "[-T d|u] [pool] ... [interval [count]]\n"));
 	case HELP_OFFLINE:
 		return (gettext("\toffline [-t] <pool> <device> ...\n"));
@@ -4567,7 +4567,11 @@ typedef struct list_cbdata {
 	boolean_t	cb_scripted;
 	zprop_list_t	*cb_proplist;
 	boolean_t	cb_literal;
+	boolean_t	cb_catagory;
 } list_cbdata_t;
+
+#define	CATAGORY_NAME_WIDTH	12
+
 
 /*
  * Given a list of columns to display, output appropriate headers for each one.
@@ -4581,6 +4585,20 @@ print_header(list_cbdata_t *cb)
 	boolean_t first = B_TRUE;
 	boolean_t right_justify;
 	size_t width = 0;
+
+	if (cb->cb_catagory) {
+		const char *line = "-----  -----  -----";
+		const char *column = " SIZE  ALLOC  USING";
+
+		(void) printf("\n%*s  %19s  %19s  %19s\n", CATAGORY_NAME_WIDTH,
+		    "", "Generic Blocks  ", "Small Blocks   ",
+		    "Metadata Blocks  ");
+		(void) printf("%-*s  %s  %s  %s\n", CATAGORY_NAME_WIDTH,
+		    "NAME", column, column, column);
+		(void) printf("%-*s  %s  %s  %s\n", CATAGORY_NAME_WIDTH,
+		    "------------", line, line, line);
+		return;
+	}
 
 	for (; pl != NULL; pl = pl->pl_next) {
 		width = pl->pl_width;
@@ -4718,12 +4736,14 @@ print_one_column(zpool_prop_t prop, uint64_t value, boolean_t scripted,
 		}
 		break;
 	case ZPOOL_PROP_CAPACITY:
+		/* by convention capacity value is 100x for more precision */
 		if (format == ZFS_NICENUM_RAW)
 			(void) snprintf(propval, sizeof (propval), "%llu",
-			    (unsigned long long)value);
+			    (unsigned long long)value / 100);
 		else
-			(void) snprintf(propval, sizeof (propval), "%llu%%",
-			    (unsigned long long)value);
+			(void) snprintf(propval, sizeof (propval),
+			    value < 1000 ? "%1.2f%%" : value < 10000 ?
+			    "%2.1f%%" : "%3.0f%%", value / 100.0);
 		break;
 	default:
 		zfs_nicenum_format(value, propval, sizeof (propval), format);
@@ -4738,6 +4758,10 @@ print_one_column(zpool_prop_t prop, uint64_t value, boolean_t scripted,
 		(void) printf("  %*s", (int)width, propval);
 }
 
+/*
+ * print static default line per vdev
+ * not compatible with '-o' <proplist> option
+ */
 void
 print_list_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
     list_cbdata_t *cb, int depth)
@@ -4791,7 +4815,7 @@ print_list_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 		    (vs->vs_fragmentation != ZFS_FRAG_INVALID && toplevel),
 		    format);
 		cap = (vs->vs_space == 0) ? 0 :
-		    (vs->vs_alloc * 100 / vs->vs_space);
+		    (vs->vs_alloc * 10000 / vs->vs_space);
 		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, toplevel,
 		    format);
 		(void) printf("\n");
@@ -4859,6 +4883,84 @@ print_list_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 	}
 }
 
+void
+print_catagory_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
+    list_cbdata_t *cb, int depth)
+{
+	nvlist_t **child;
+	vdev_stat_t *vs;
+	uint_t c, children;
+	boolean_t scripted = cb->cb_scripted;
+
+	if (nvlist_lookup_uint64_array(nv, ZPOOL_CONFIG_VDEV_STATS,
+	    (uint64_t **)&vs, &c) != 0 ||
+	    (vs->vs_space_metadata == 0 && vs->vs_space_smallblks == 0))
+		return;
+
+	if (name != NULL && vs->vs_space != 0) {
+		uint64_t cap, gen_alloc, gen_space;
+		enum zfs_nicenum_format format;
+
+		if (cb->cb_literal)
+			format = ZFS_NICENUM_RAW;
+		else
+			format = ZFS_NICENUM_1024;
+
+		if (scripted)
+			(void) printf("\t%s", name);
+		else if (strlen(name) + depth > cb->cb_namewidth)
+			(void) printf("%*s%s", depth, "", name);
+		else
+			(void) printf("%*s%s%*s", depth, "", name,
+			    (int)(cb->cb_namewidth - strlen(name) - depth), "");
+
+		/* Print Generic Catagory */
+		gen_alloc = vs->vs_alloc - vs->vs_alloc_metadata -
+		    vs->vs_alloc_smallblks;
+		gen_space = vs->vs_space - vs->vs_space_metadata -
+		    vs->vs_space_smallblks;
+		print_one_column(ZPOOL_PROP_SIZE, gen_space, scripted, B_TRUE,
+		    format);
+		print_one_column(ZPOOL_PROP_ALLOCATED, gen_alloc, scripted,
+		    B_TRUE, format);
+		cap = (gen_space == 0) ? 0 : (gen_alloc * 10000 / gen_space);
+		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
+		    format);
+
+		/* Print Small Block Catagory */
+		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_smallblks,
+		    scripted, B_TRUE, format);
+		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_smallblks,
+		    scripted, B_TRUE, format);
+		cap = (vs->vs_space_smallblks == 0) ? 0 :
+		    (vs->vs_alloc_smallblks * 10000 / vs->vs_space_smallblks);
+		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
+		    format);
+
+		/* Print Metadata Catagory */
+		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_metadata,
+		    scripted, B_TRUE, format);
+		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_metadata,
+		    scripted, B_TRUE, format);
+		cap = (vs->vs_space_metadata == 0) ? 0 :
+		    (vs->vs_alloc_metadata * 10000 / vs->vs_space_metadata);
+		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
+		    format);
+
+		(void) printf("\n");
+	}
+
+	if (nvlist_lookup_nvlist_array(nv, ZPOOL_CONFIG_CHILDREN,
+	    &child, &children) != 0)
+		return;
+
+	for (c = 0; c < children; c++) {
+		char *vname = zpool_vdev_name(g_zfs, zhp, child[c],
+		    cb->cb_name_flags | VDEV_NAME_ALLOC_BIAS);
+		print_catagory_stats(zhp, vname, child[c], cb, depth + 2);
+		free(vname);
+	}
+}
 
 /*
  * Generic callback function to list a pool.
@@ -4872,12 +4974,22 @@ list_callback(zpool_handle_t *zhp, void *data)
 
 	config = zpool_get_config(zhp, NULL);
 
-	if (cbp->cb_verbose) {
+	if (cbp->cb_verbose || cbp->cb_catagory) {
+		config = zpool_get_config(zhp, NULL);
+
 		verify(nvlist_lookup_nvlist(config, ZPOOL_CONFIG_VDEV_TREE,
 		    &nvroot) == 0);
+	}
+
+	if (cbp->cb_catagory) {
+		print_catagory_stats(zhp, zpool_get_name(zhp), nvroot, cbp, 0);
+		return (0);
+
+	}
+
+	if (cbp->cb_verbose)
 		cbp->cb_namewidth = max_width(zhp, nvroot, 0, 0,
 		    cbp->cb_name_flags | VDEV_NAME_ALLOC_BIAS);
-	}
 
 	print_pool(zhp, cbp);
 
@@ -4888,8 +5000,9 @@ list_callback(zpool_handle_t *zhp, void *data)
 }
 
 /*
- * zpool list [-gHLpP] [-o prop[,prop]*] [-T d|u] [pool] ... [interval [count]]
+ * zpool list [-CgHLpP] [-o prop[,prop]*] [-T d|u] [pool] ... [interval [count]]
  *
+ *	-C	Diplay the list of block allocations by catagory
  *	-g	Display guid for individual vdev name.
  *	-H	Scripted mode.  Don't display headers, and separate properties
  *		by a single tab.
@@ -4913,6 +5026,7 @@ zpool_do_list(int argc, char **argv)
 	static char default_props[] =
 	    "name,size,allocated,free,expandsize,fragmentation,capacity,"
 	    "dedupratio,health,altroot";
+	static char catagory_props[] = "name,size,allocated";
 	char *props = default_props;
 	float interval = 0;
 	unsigned long count = 0;
@@ -4920,8 +5034,15 @@ zpool_do_list(int argc, char **argv)
 	boolean_t first = B_TRUE;
 
 	/* check options */
-	while ((c = getopt(argc, argv, ":gHLo:pPT:v")) != -1) {
+	while ((c = getopt(argc, argv, ":CgHLo:pPT:v")) != -1) {
 		switch (c) {
+		case 'C':
+			cb.cb_catagory = B_TRUE;
+			props = catagory_props;
+			cb.cb_name_flags |= VDEV_NAME_TYPE_ID;
+			cb.cb_namewidth = CATAGORY_NAME_WIDTH;
+			cb.cb_verbose = B_TRUE;
+			break;
 		case 'g':
 			cb.cb_name_flags |= VDEV_NAME_GUID;
 			break;
@@ -4945,6 +5066,7 @@ zpool_do_list(int argc, char **argv)
 			break;
 		case 'v':
 			cb.cb_verbose = B_TRUE;
+			cb.cb_namewidth = 8;	/* 8 until precalc is avail */
 			break;
 		case ':':
 			(void) fprintf(stderr, gettext("missing argument for "
