@@ -258,7 +258,7 @@ spa_scan_thread(void *arg)
 				ASSERT3U(group_left, <=, vdev_draid_get_groupsz(vd, mirror));
 
 				chunksz = MIN(length, group_left);
-				if (vdev_draid_group_degraded(vd, sscan->ssa_vd, offset, mirror)) {
+				if (vdev_draid_group_degraded(vd, sscan->ssa_vd, offset, chunksz, mirror)) {
 					action = "Fixing";
 					spa_scan_rebuild(pio, vd, offset, chunksz);
 				}

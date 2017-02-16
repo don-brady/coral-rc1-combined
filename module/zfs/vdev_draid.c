@@ -49,11 +49,10 @@ int draid_debug_lvl = 1;
 void
 vdev_draid_debug_zio(zio_t *zio, boolean_t mirror)
 {
-	uint64_t ashift = zio->io_vd->vdev_top->vdev_ashift;
 	int c;
 
-	draid_dbg(3, "zio: off "U64FMT" sz "U64FMT" data %p\n",
-	    zio->io_offset >> ashift, zio->io_size >> ashift, zio->io_abd);
+	draid_dbg(3, "zio: off "U64FMT"K sz "U64FMT"K data %p\n",
+	    zio->io_offset >> 10, zio->io_size >> 10, zio->io_abd);
 
 	if (mirror) {
 	} else {
@@ -62,10 +61,10 @@ vdev_draid_debug_zio(zio_t *zio, boolean_t mirror)
 		for (c = 0; c < rm->rm_cols; c++) {
 			raidz_col_t *rc = &rm->rm_col[c];
 
-			draid_dbg(3, "%c: dev %lu off %lu, sz %lu, err %d, buf %p\n",
+			draid_dbg(3, "%c: dev %lu off %luK, sz %luK, err %d, buf %p\n",
 			    c < rm->rm_firstdatacol ? 'P' : 'D',
-			    rc->rc_devidx, rc->rc_offset >> ashift,
-			    rc->rc_size >> ashift, rc->rc_error, rc->rc_abd);
+			    rc->rc_devidx, rc->rc_offset >> 10,
+			    rc->rc_size >> 10, rc->rc_error, rc->rc_abd);
 		}
 	}
 }
@@ -554,7 +553,7 @@ vdev_draid_vd_degraded(vdev_t *vd, const vdev_t *oldvd, uint64_t offset)
 }
 
 boolean_t
-vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, boolean_t mirror)
+vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t size, boolean_t mirror)
 {
 	uint64_t ashift = vd->vdev_top->vdev_ashift;
 	uint64_t group = vdev_draid_offset2group(vd, offset, mirror);
@@ -614,9 +613,10 @@ vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, boolean_t 
 	for (c = 0; c < cfg->dcf_spare; c++)
 		snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
 		    U64FMT" ", perm[cfg->dcf_children - 1 - c]);
-	draid_dbg(2, "%s %s: %s\n",
+	draid_dbg(4, "%s %s at "U64FMT"K of "U64FMT"K: %s\n",
 	    degraded ? "Degraded" : "Healthy",
-	    mirror ? "mirror" : "draid", buf);
+	    mirror ? "mirror" : "draid",
+	    offset >> 10, size >> 10, buf);
 
 	kmem_free(perm, sizeof(perm[0]) * cfg->dcf_children);
 	(*zio->io_vsd_ops->vsd_free)(zio);
@@ -922,7 +922,7 @@ vdev_draid_need_resilver(vdev_t *vd, uint64_t offset, size_t psize)
 	/* A block cannot cross redundancy group boundary */
 	ASSERT3U(offset, ==, vdev_draid_check_block(vd, offset, vdev_draid_asize(vd, psize)));
 
-	return (vdev_draid_group_degraded(vd, NULL, offset, mirror));
+	return (vdev_draid_group_degraded(vd, NULL, offset, psize, mirror));
 }
 
 /*
