@@ -3525,14 +3525,15 @@ vdev_space_update(vdev_t *vd, int64_t alloc_delta, int64_t defer_delta,
 }
 
 /*
- * propogate metaslab block catagory changes to vdev state
+ * propagate metaslab block category changes to vdev state
  */
 void
-vdev_catagory_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
+vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
     int64_t metadata_space_delta, int64_t smallblks_alloc_delta,
-    int64_t smallblks_space_delta)
+    int64_t smallblks_space_delta, boolean_t in_class)
 {
 	vdev_t *rvd = vd->vdev_spa->spa_root_vdev;
+	uint64_t allocated, overage;
 
 	ASSERT(vd == vd->vdev_top);
 
@@ -3541,6 +3542,8 @@ vdev_catagory_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
 	vd->vdev_stat.vs_space_metadata += metadata_space_delta;
 	vd->vdev_stat.vs_alloc_smallblks += smallblks_alloc_delta;
 	vd->vdev_stat.vs_space_smallblks += smallblks_space_delta;
+	if (in_class)
+		vd->vdev_stat.vs_calloc_smallblks += smallblks_alloc_delta;
 	mutex_exit(&vd->vdev_stat_lock);
 
 	mutex_enter(&rvd->vdev_stat_lock);
@@ -3548,7 +3551,57 @@ vdev_catagory_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
 	rvd->vdev_stat.vs_space_metadata += metadata_space_delta;
 	rvd->vdev_stat.vs_alloc_smallblks += smallblks_alloc_delta;
 	rvd->vdev_stat.vs_space_smallblks += smallblks_space_delta;
+	if (in_class)
+		rvd->vdev_stat.vs_calloc_smallblks += smallblks_alloc_delta;
+
+	if (metadata_alloc_delta > 0 && rvd->vdev_stat.vs_space_metadata > 0) {
+		allocated = rvd->vdev_stat.vs_alloc_metadata;
+		overage = allocated > rvd->vdev_stat.vs_space_metadata ?
+		    allocated - rvd->vdev_stat.vs_space_metadata : 0;
+		metaslab_class_stat_update(MS_CATEGORY_METADATA, allocated,
+		    overage);
+	}
+	if (smallblks_alloc_delta > 0 && rvd->vdev_stat.vs_space_smallblks) {
+		allocated = rvd->vdev_stat.vs_alloc_smallblks;
+		overage = allocated > rvd->vdev_stat.vs_space_smallblks ?
+		    allocated - rvd->vdev_stat.vs_space_smallblks : 0;
+		metaslab_class_stat_update(MS_CATEGORY_SMALL, allocated,
+		    overage);
+	}
 	mutex_exit(&rvd->vdev_stat_lock);
+}
+
+boolean_t
+vdev_category_space_full(vdev_t *vd, metaslab_block_category_t category,
+    int64_t request)
+{
+	/*
+	 * Note that we intentionally don't subtract here to derive
+	 * the free space. Total pool-wide allocations can exceed
+	 * the space we set aside for a given category.
+	 *
+	 * Also don't bother with locking here since this is just
+	 * used for soft limit checks.
+	 */
+	if (category == MS_CATEGORY_METADATA &&
+	    (vd->vdev_stat.vs_alloc_metadata + request) <
+	    vd->vdev_stat.vs_space_metadata)
+		return (B_FALSE);
+
+	if (category == MS_CATEGORY_SMALL &&
+	    (vd->vdev_stat.vs_calloc_smallblks + request) <
+	    vd->vdev_stat.vs_space_smallblks)
+		return (B_FALSE);
+
+	if (category == MS_CATEGORY_REGULAR) {
+		metaslab_class_t *mc = spa_normal_class(vd->vdev_spa);
+
+		if ((metaslab_class_get_alloc(mc) + request) <
+		    metaslab_class_get_space(mc))
+			return (B_FALSE);
+	}
+
+	return (B_TRUE);
 }
 
 /*

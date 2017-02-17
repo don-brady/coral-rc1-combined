@@ -860,6 +860,7 @@ typedef struct vdev_stat {
 	uint64_t	vs_space_metadata;	/* metadata capacity	*/
 	uint64_t	vs_alloc_smallblks;	/* small blks allocated */
 	uint64_t	vs_space_smallblks;	/* small blks capacity	*/
+	uint64_t	vs_calloc_smallblks;	/* allocated from class	*/
 } vdev_stat_t;
 
 /*

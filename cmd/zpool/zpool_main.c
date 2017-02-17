@@ -4567,10 +4567,10 @@ typedef struct list_cbdata {
 	boolean_t	cb_scripted;
 	zprop_list_t	*cb_proplist;
 	boolean_t	cb_literal;
-	boolean_t	cb_catagory;
+	boolean_t	cb_category;
 } list_cbdata_t;
 
-#define	CATAGORY_NAME_WIDTH	12
+#define	CATEGORY_NAME_WIDTH	12
 
 
 /*
@@ -4586,16 +4586,16 @@ print_header(list_cbdata_t *cb)
 	boolean_t right_justify;
 	size_t width = 0;
 
-	if (cb->cb_catagory) {
+	if (cb->cb_category) {
 		const char *line = "-----  -----  -----";
-		const char *column = " SIZE  ALLOC  USING";
+		const char *column = "SPACE  ALLOC  USING";
 
-		(void) printf("\n%*s  %19s  %19s  %19s\n", CATAGORY_NAME_WIDTH,
+		(void) printf("\n%*s  %19s  %19s  %19s\n", CATEGORY_NAME_WIDTH,
 		    "", "Generic Blocks  ", "Small Blocks   ",
 		    "Metadata Blocks  ");
-		(void) printf("%-*s  %s  %s  %s\n", CATAGORY_NAME_WIDTH,
+		(void) printf("%-*s  %s  %s  %s\n", CATEGORY_NAME_WIDTH,
 		    "NAME", column, column, column);
-		(void) printf("%-*s  %s  %s  %s\n", CATAGORY_NAME_WIDTH,
+		(void) printf("%-*s  %s  %s  %s\n", CATEGORY_NAME_WIDTH,
 		    "------------", line, line, line);
 		return;
 	}
@@ -4884,7 +4884,7 @@ print_list_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 }
 
 void
-print_catagory_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
+print_category_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
     list_cbdata_t *cb, int depth)
 {
 	nvlist_t **child;
@@ -4914,7 +4914,7 @@ print_catagory_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 			(void) printf("%*s%s%*s", depth, "", name,
 			    (int)(cb->cb_namewidth - strlen(name) - depth), "");
 
-		/* Print Generic Catagory */
+		/* Print Generic Category */
 		gen_alloc = vs->vs_alloc - vs->vs_alloc_metadata -
 		    vs->vs_alloc_smallblks;
 		gen_space = vs->vs_space - vs->vs_space_metadata -
@@ -4927,7 +4927,7 @@ print_catagory_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
 		    format);
 
-		/* Print Small Block Catagory */
+		/* Print Small Block Category */
 		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_smallblks,
 		    scripted, B_TRUE, format);
 		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_smallblks,
@@ -4937,7 +4937,7 @@ print_catagory_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
 		    format);
 
-		/* Print Metadata Catagory */
+		/* Print Metadata Category */
 		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_metadata,
 		    scripted, B_TRUE, format);
 		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_metadata,
@@ -4957,7 +4957,7 @@ print_catagory_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 	for (c = 0; c < children; c++) {
 		char *vname = zpool_vdev_name(g_zfs, zhp, child[c],
 		    cb->cb_name_flags | VDEV_NAME_ALLOC_BIAS);
-		print_catagory_stats(zhp, vname, child[c], cb, depth + 2);
+		print_category_stats(zhp, vname, child[c], cb, depth + 2);
 		free(vname);
 	}
 }
@@ -4974,15 +4974,15 @@ list_callback(zpool_handle_t *zhp, void *data)
 
 	config = zpool_get_config(zhp, NULL);
 
-	if (cbp->cb_verbose || cbp->cb_catagory) {
+	if (cbp->cb_verbose || cbp->cb_category) {
 		config = zpool_get_config(zhp, NULL);
 
 		verify(nvlist_lookup_nvlist(config, ZPOOL_CONFIG_VDEV_TREE,
 		    &nvroot) == 0);
 	}
 
-	if (cbp->cb_catagory) {
-		print_catagory_stats(zhp, zpool_get_name(zhp), nvroot, cbp, 0);
+	if (cbp->cb_category) {
+		print_category_stats(zhp, zpool_get_name(zhp), nvroot, cbp, 0);
 		return (0);
 
 	}
@@ -5002,7 +5002,7 @@ list_callback(zpool_handle_t *zhp, void *data)
 /*
  * zpool list [-CgHLpP] [-o prop[,prop]*] [-T d|u] [pool] ... [interval [count]]
  *
- *	-C	Diplay the list of block allocations by catagory
+ *	-C	Diplay the list of block allocations by category
  *	-g	Display guid for individual vdev name.
  *	-H	Scripted mode.  Don't display headers, and separate properties
  *		by a single tab.
@@ -5026,7 +5026,7 @@ zpool_do_list(int argc, char **argv)
 	static char default_props[] =
 	    "name,size,allocated,free,expandsize,fragmentation,capacity,"
 	    "dedupratio,health,altroot";
-	static char catagory_props[] = "name,size,allocated";
+	static char category_props[] = "name,size,allocated";
 	char *props = default_props;
 	float interval = 0;
 	unsigned long count = 0;
@@ -5037,10 +5037,10 @@ zpool_do_list(int argc, char **argv)
 	while ((c = getopt(argc, argv, ":CgHLo:pPT:v")) != -1) {
 		switch (c) {
 		case 'C':
-			cb.cb_catagory = B_TRUE;
-			props = catagory_props;
+			cb.cb_category = B_TRUE;
+			props = category_props;
 			cb.cb_name_flags |= VDEV_NAME_TYPE_ID;
-			cb.cb_namewidth = CATAGORY_NAME_WIDTH;
+			cb.cb_namewidth = CATEGORY_NAME_WIDTH;
 			cb.cb_verbose = B_TRUE;
 			break;
 		case 'g':

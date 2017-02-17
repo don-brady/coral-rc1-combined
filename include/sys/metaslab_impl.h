@@ -376,15 +376,6 @@ struct metaslab {
 	txg_node_t	ms_txg_node;	/* per-txg dirty metaslab links	*/
 };
 
-typedef enum metaslab_block_category {
-	MS_CATEGORY_REGULAR,	/* regular file data */
-	MS_CATEGORY_LOG,	/* log data */
-	MS_CATEGORY_METADATA,	/* metadata */
-	MS_CATEGORY_DEDUP,	/* dedup block */
-	MS_CATEGORY_SMALL	/* small block */
-} metaslab_block_category_t;
-
-
 #ifdef	__cplusplus
 }
 #endif

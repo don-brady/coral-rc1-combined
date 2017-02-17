@@ -1747,9 +1747,31 @@ spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
 			return (spa_custom_class(spa));
 	}
 	if (spa->spa_segregate_smallblks) {
-		if (size <= zfs_class_smallblk_limit &&
-		    spa->spa_custom_class->mc_rotor != NULL) {
-			return (spa_custom_class(spa));
+		/*
+		 * We are segregating small blocks
+		 *
+		 * Limit how many we allow into small block metaslabs and
+		 * allow large blocks to spill into those metaslabs when
+		 * the nomal class is full.
+		 */
+		if (size <= zfs_class_smallblk_limit) {
+			/*
+			 * Allow request if it will keep us under our soft limit
+			 */
+			if (!vdev_category_space_full(spa->spa_root_vdev,
+			    MS_CATEGORY_SMALL, size)) {
+				return (spa_custom_class(spa));
+			}
+		} else {
+			/*
+			 * Allow some large blocks to spill when normal is full
+			 */
+			if (vdev_category_space_full(spa->spa_root_vdev,
+			    MS_CATEGORY_REGULAR, size) &&
+			    !vdev_category_space_full(spa->spa_root_vdev,
+			    MS_CATEGORY_SMALL, size)) {
+				return (spa_custom_class(spa));
+			}
 		}
 	}
 
@@ -1920,6 +1942,7 @@ spa_init(int mode)
 	unique_init();
 	range_tree_init();
 	metaslab_alloc_trace_init();
+	metaslab_class_stat_init();
 	ddt_init();
 	zio_init();
 	dmu_init();
@@ -1950,6 +1973,7 @@ spa_fini(void)
 	zio_fini();
 	ddt_fini();
 	metaslab_alloc_trace_fini();
+	metaslab_class_stat_fini();
 	range_tree_fini();
 	unique_fini();
 	refcount_fini();

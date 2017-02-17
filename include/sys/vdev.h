@@ -98,10 +98,6 @@ extern void vdev_set_state(vdev_t *vd, boolean_t isopen, vdev_state_t state,
 extern void vdev_space_update(vdev_t *vd,
     int64_t alloc_delta, int64_t defer_delta, int64_t space_delta);
 
-extern void vdev_catagory_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
-    int64_t metadata_space_delta, int64_t smallblks_alloc_delta,
-    int64_t smallblks_space_delta);
-
 extern int64_t vdev_deflated_space(vdev_t *vd, int64_t space);
 
 extern uint64_t vdev_psize_to_asize(vdev_t *vd, uint64_t psize);

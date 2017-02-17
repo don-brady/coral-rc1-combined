@@ -1488,11 +1488,12 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 			ms->ms_category_enabled_birth =
 			    ms->ms_sm->sm_phys->smp_alloc_info.enabled_birth;
 
-			vdev_catagory_space_update(vd,
+			vdev_category_space_update(vd,
 			    ms->ms_sm->sm_phys->smp_alloc_info.metadata_alloc,
 			    0,
 			    ms->ms_sm->sm_phys->smp_alloc_info.smallblks_alloc,
-			    0);
+			    0, space_map_get_alloc_bias(ms->ms_sm) ==
+			    SM_ALLOC_BIAS_SMALLBLKS);
 		}
 
 	} else if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
@@ -1557,9 +1558,9 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 			uint64_t md_ratio = p1 * 100 / (p1 + p2);
 			uint64_t sb_ratio = p2 * 100 / (p1 + p2);
 
-			vdev_catagory_space_update(vd,
+			vdev_category_space_update(vd,
 			    0, (ms->ms_size * md_ratio) / 100,
-			    0, (ms->ms_size * sb_ratio) / 100);
+			    0, (ms->ms_size * sb_ratio) / 100, B_FALSE);
 		}
 	}
 
@@ -1627,11 +1628,13 @@ metaslab_fini(metaslab_t *msp)
 				sb_ratio = p2 * 100 / (p1 + p2);
 			}
 		}
-		vdev_catagory_space_update(mg->mg_vd,
+		vdev_category_space_update(mg->mg_vd,
 		    -msp->ms_sm->sm_phys->smp_alloc_info.metadata_alloc,
 		    -(msp->ms_size * md_ratio / 100),
 		    -msp->ms_sm->sm_phys->smp_alloc_info.smallblks_alloc,
-		    -(msp->ms_size * sb_ratio / 100));
+		    -(msp->ms_size * sb_ratio / 100),
+		    space_map_get_alloc_bias(msp->ms_sm) ==
+		    SM_ALLOC_BIAS_SMALLBLKS);
 	}
 	space_map_close(msp->ms_sm);
 
@@ -2458,9 +2461,11 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		    msp->ms_metadata_count[txg & TXG_MASK],
 		    msp->ms_smallblks_count[txg & TXG_MASK]);
 
-		vdev_catagory_space_update(vd,
+		vdev_category_space_update(vd,
 		    msp->ms_metadata_count[txg & TXG_MASK], 0,
-		    msp->ms_smallblks_count[txg & TXG_MASK], 0);
+		    msp->ms_smallblks_count[txg & TXG_MASK], 0,
+		    space_map_get_alloc_bias(msp->ms_sm) ==
+		    SM_ALLOC_BIAS_SMALLBLKS);
 
 		msp->ms_dedup_count[txg & TXG_MASK] = 0;
 		msp->ms_metadata_count[txg & TXG_MASK] = 0;
@@ -2853,6 +2858,65 @@ metaslab_trace_fini(zio_alloc_list_t *zal)
 }
 
 #endif /* _METASLAB_TRACING */
+
+/*
+ * Metaslab class overage stats
+ */
+kstat_t *mscs_ksp = NULL;
+
+typedef struct ms_class_stats {
+	kstat_named_t	metadata_highest_allocated;
+	kstat_named_t	metadata_highest_overage;
+	kstat_named_t	smallblks_highest_allocated;
+	kstat_named_t	smallblks_highest_overage;
+} ms_class_stats_t;
+
+static ms_class_stats_t ms_class_stats = {
+	{ "metadata_highest_allocated",	KSTAT_DATA_UINT64 },
+	{ "metadata_highest_overage",	KSTAT_DATA_UINT64 },
+	{ "smallblks_highest_allocated", KSTAT_DATA_UINT64 },
+	{ "smallblks_highest_overage",	KSTAT_DATA_UINT64 }
+};
+
+#define	MS_CLASS_STAT(stat)	(ms_class_stats.stat.value.ui64)
+
+void
+metaslab_class_stat_init(void)
+{
+	mscs_ksp = kstat_create("zfs", 0, "alloc_class_stats", "misc",
+	    KSTAT_TYPE_NAMED, sizeof (ms_class_stats) / sizeof (kstat_named_t),
+	    KSTAT_FLAG_VIRTUAL);
+	if (mscs_ksp != NULL) {
+		mscs_ksp->ks_data = &ms_class_stats;
+		kstat_install(mscs_ksp);
+	}
+}
+
+void
+metaslab_class_stat_fini(void)
+{
+	if (mscs_ksp != NULL) {
+		kstat_delete(mscs_ksp);
+		mscs_ksp = NULL;
+	}
+}
+
+void
+metaslab_class_stat_update(metaslab_block_category_t blkcat, uint64_t allocated,
+    uint64_t overage)
+{
+	if (blkcat == MS_CATEGORY_METADATA) {
+		if (allocated > MS_CLASS_STAT(metadata_highest_allocated))
+			MS_CLASS_STAT(metadata_highest_allocated) = allocated;
+		if (overage > MS_CLASS_STAT(metadata_highest_overage))
+			MS_CLASS_STAT(metadata_highest_overage) = overage;
+	} else if (blkcat == MS_CATEGORY_SMALL) {
+		if (allocated > MS_CLASS_STAT(smallblks_highest_allocated))
+			MS_CLASS_STAT(smallblks_highest_allocated) = allocated;
+		if (overage > MS_CLASS_STAT(smallblks_highest_overage))
+			MS_CLASS_STAT(smallblks_highest_overage) = overage;
+	}
+}
 
 /*
  * ==========================================================================
