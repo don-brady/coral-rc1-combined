@@ -51,20 +51,41 @@ vdev_draid_debug_zio(zio_t *zio, boolean_t mirror)
 {
 	int c;
 
-	draid_dbg(3, "zio: off "U64FMT"K sz "U64FMT"K data %p\n",
-	    zio->io_offset >> 10, zio->io_size >> 10, zio->io_abd);
+	draid_dbg(3, "%s zio: off "U64FMT"K sz "U64FMT"K data %p\n",
+	    mirror ? "Mirror" : "dRAID", zio->io_offset >> 10,
+	    zio->io_size >> 10, zio->io_abd);
 
 	if (mirror) {
 	} else {
 		raidz_map_t *rm = zio->io_vsd;
 
-		for (c = 0; c < rm->rm_cols; c++) {
+		for (c = 0; c < rm->rm_scols; c++) {
+			char t = 'D';
 			raidz_col_t *rc = &rm->rm_col[c];
+			vdev_t *cvd = zio->io_vd->vdev_child[rc->rc_devidx];
 
-			draid_dbg(3, "%c: dev %lu off %luK, sz %luK, err %d, buf %p\n",
-			    c < rm->rm_firstdatacol ? 'P' : 'D',
-			    rc->rc_devidx, rc->rc_offset >> 10,
-			    rc->rc_size >> 10, rc->rc_error, rc->rc_abd);
+			if (c >= rm->rm_cols) {
+				t = 'S';
+			} else if (c < rm->rm_firstdatacol) {
+				switch (c) {
+				case 0:
+					t = 'P';
+					break;
+				case 1:
+					t = 'Q';
+					break;
+				case 2:
+					t = 'R';
+					break;
+				default:
+					ASSERT0(c);
+				}
+			}
+
+			draid_dbg(3, "%c: dev %lu (%s) off %luK, sz %luK, err %d, skipped %d, tried %d\n",
+			    t, rc->rc_devidx, cvd->vdev_path != NULL ? cvd->vdev_path : "NA",
+			    rc->rc_offset >> 10, rc->rc_size >> 10,
+			    rc->rc_error, rc->rc_skipped, rc->rc_tried);
 		}
 	}
 }
