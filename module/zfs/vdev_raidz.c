@@ -1527,8 +1527,8 @@ vdev_raidz_reconstruct(raidz_map_t *rm, const int *t, int nt)
 {
 	int tgts[VDEV_RAIDZ_MAXPARITY], *dt;
 	int ntgts;
-	int i, c, ret;
-	int code;
+	int i, c, code;
+	int cols = 0;
 	int nbadparity, nbaddata;
 	int parity_valid[VDEV_RAIDZ_MAXPARITY];
 
@@ -1563,25 +1563,32 @@ vdev_raidz_reconstruct(raidz_map_t *rm, const int *t, int nt)
 	ASSERT(nbaddata >= 0);
 	ASSERT(nbaddata + nbadparity == ntgts);
 
+	if (rm->rm_declustered)
+		cols = vdev_draid_hide_skip_sectors(rm);
+
 	dt = &tgts[nbadparity];
 
 	/* Reconstruct using the new math implementation */
-	ret = vdev_raidz_math_reconstruct(rm, parity_valid, dt, nbaddata);
-	if (ret != RAIDZ_ORIGINAL_IMPL)
-		return (ret);
+	code = vdev_raidz_math_reconstruct(rm, parity_valid, dt, nbaddata);
+	if (code != RAIDZ_ORIGINAL_IMPL)
+		goto out;
 
 	/*
 	 * See if we can use any of our optimized reconstruction routines.
 	 */
 	switch (nbaddata) {
 	case 1:
-		if (parity_valid[VDEV_RAIDZ_P])
-			return (vdev_raidz_reconstruct_p(rm, dt, 1));
+		if (parity_valid[VDEV_RAIDZ_P]) {
+			code = vdev_raidz_reconstruct_p(rm, dt, 1);
+			goto out;
+		}
 
 		ASSERT(rm->rm_firstdatacol > 1);
 
-		if (parity_valid[VDEV_RAIDZ_Q])
-			return (vdev_raidz_reconstruct_q(rm, dt, 1));
+		if (parity_valid[VDEV_RAIDZ_Q]) {
+			code = vdev_raidz_reconstruct_q(rm, dt, 1);
+			goto out;
+		}
 
 		ASSERT(rm->rm_firstdatacol > 2);
 		break;
@@ -1590,8 +1597,10 @@ vdev_raidz_reconstruct(raidz_map_t *rm, const int *t, int nt)
 		ASSERT(rm->rm_firstdatacol > 1);
 
 		if (parity_valid[VDEV_RAIDZ_P] &&
-		    parity_valid[VDEV_RAIDZ_Q])
-			return (vdev_raidz_reconstruct_pq(rm, dt, 2));
+		    parity_valid[VDEV_RAIDZ_Q]) {
+			code = vdev_raidz_reconstruct_pq(rm, dt, 2);
+			goto out;
+		}
 
 		ASSERT(rm->rm_firstdatacol > 2);
 
@@ -1601,6 +1610,9 @@ vdev_raidz_reconstruct(raidz_map_t *rm, const int *t, int nt)
 	code = vdev_raidz_reconstruct_general(rm, tgts, ntgts);
 	ASSERT(code < (1 << VDEV_RAIDZ_MAXPARITY));
 	ASSERT(code > 0);
+out:
+	if (rm->rm_declustered)
+		vdev_draid_restore_skip_sectors(rm, cols);
 	return (code);
 }
 

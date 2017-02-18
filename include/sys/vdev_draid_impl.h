@@ -35,6 +35,7 @@ extern "C" {
 
 typedef struct zio zio_t;
 typedef struct vdev vdev_t;
+typedef struct raidz_map raidz_map_t;
 
 struct vdev_draid_configuration {
 	uint64_t dcf_data;
@@ -57,6 +58,8 @@ extern uint64_t vdev_draid_get_groupsz(const vdev_t *, boolean_t);
 extern boolean_t vdev_draid_config_validate(const vdev_t *, nvlist_t *);
 extern boolean_t vdev_draid_config_add(nvlist_t *, nvlist_t *);
 extern void vdev_draid_fix_skip_sectors(zio_t *);
+extern int vdev_draid_hide_skip_sectors(raidz_map_t *);
+extern void vdev_draid_restore_skip_sectors(raidz_map_t *, int);
 extern boolean_t vdev_draid_readable(vdev_t *, uint64_t);
 extern boolean_t vdev_draid_is_dead(vdev_t *, uint64_t);
 extern boolean_t vdev_draid_missing(vdev_t *, uint64_t, uint64_t, uint64_t);

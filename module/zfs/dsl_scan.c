@@ -1861,6 +1861,8 @@ dsl_scan_scrub_done(zio_t *zio)
 	mutex_exit(&spa->spa_scrub_lock);
 }
 
+static int zfs_no_resilver_skip = 1;
+
 static boolean_t
 dsl_scan_need_resilver(spa_t *spa, const dva_t *dva,
 		       size_t size, uint64_t phys_birth)
@@ -1883,6 +1885,9 @@ dsl_scan_need_resilver(spa_t *spa, const dva_t *dva,
 	vd = vdev_lookup_top(spa, DVA_GET_VDEV(dva));
 	if (!vdev_dtl_contains(vd, DTL_PARTIAL, phys_birth, 1))
 		return (B_FALSE);
+
+	if (zfs_no_resilver_skip != 0)
+		return (B_TRUE);
 
 	offset = DVA_GET_OFFSET(dva);
 	if (vd->vdev_ops == &vdev_raidz_ops)
@@ -2024,6 +2029,9 @@ MODULE_PARM_DESC(zfs_free_min_time_ms, "Min millisecs to free per txg");
 
 module_param(zfs_resilver_min_time_ms, int, 0644);
 MODULE_PARM_DESC(zfs_resilver_min_time_ms, "Min millisecs to resilver per txg");
+
+module_param(zfs_no_resilver_skip, int, 0644);
+MODULE_PARM_DESC(zfs_no_resilver_skip, "Set to disable skipping spurious resilver IO");
 
 module_param(zfs_no_scrub_io, int, 0644);
 MODULE_PARM_DESC(zfs_no_scrub_io, "Set to disable scrub I/O");

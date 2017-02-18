@@ -1096,6 +1096,60 @@ vdev_draid_io_start(zio_t *zio)
 	zio_execute(zio);
 }
 
+int
+vdev_draid_hide_skip_sectors(raidz_map_t *rm)
+{
+	int c, cols;
+	size_t size = rm->rm_col[0].rc_size;
+
+	ASSERT(rm->rm_declustered);
+
+	for (c = rm->rm_cols; c < rm->rm_scols; c++) {
+		void *buf;
+		raidz_col_t *rc = &rm->rm_col[c];
+
+		ASSERT0(rc->rc_size);
+		ASSERT0(rc->rc_error);
+		ASSERT0(rc->rc_tried);
+		ASSERT0(rc->rc_skipped);
+		ASSERT(rc->rc_abd == NULL);
+
+		rc->rc_size = size;
+		rc->rc_abd = abd_alloc_linear(size, B_TRUE);
+		buf = abd_to_buf(rc->rc_abd);
+		bzero(buf, size);
+	}
+
+	cols = rm->rm_cols;
+	rm->rm_cols = rm->rm_scols;
+	return (cols);
+}
+
+void
+vdev_draid_restore_skip_sectors(raidz_map_t *rm, int cols)
+{
+	int c;
+
+	ASSERT(rm->rm_declustered);
+	ASSERT3U(cols, >, rm->rm_firstdatacol);
+	ASSERT3U(cols, <=, rm->rm_scols);
+
+	for (c = cols; c < rm->rm_scols; c++) {
+		raidz_col_t *rc = &rm->rm_col[c];
+
+		ASSERT0(rc->rc_error);
+		ASSERT0(rc->rc_tried);
+		ASSERT0(rc->rc_skipped);
+		ASSERT(rc->rc_abd != NULL);
+
+		abd_free(rc->rc_abd);
+		rc->rc_size = 0;
+		rc->rc_abd = NULL;
+	}
+
+	rm->rm_cols = cols;
+}
+
 void
 vdev_draid_fix_skip_sectors(zio_t *zio)
 {
