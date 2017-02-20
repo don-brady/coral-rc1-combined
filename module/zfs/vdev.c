@@ -3542,6 +3542,7 @@ vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
 	vd->vdev_stat.vs_space_metadata += metadata_space_delta;
 	vd->vdev_stat.vs_alloc_smallblks += smallblks_alloc_delta;
 	vd->vdev_stat.vs_space_smallblks += smallblks_space_delta;
+	/* Also track allocations that were strictly inside of a class */
 	if (in_class)
 		vd->vdev_stat.vs_calloc_smallblks += smallblks_alloc_delta;
 	mutex_exit(&vd->vdev_stat_lock);
@@ -3551,6 +3552,7 @@ vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
 	rvd->vdev_stat.vs_space_metadata += metadata_space_delta;
 	rvd->vdev_stat.vs_alloc_smallblks += smallblks_alloc_delta;
 	rvd->vdev_stat.vs_space_smallblks += smallblks_space_delta;
+	/* Also track allocations that were strictly inside of a class */
 	if (in_class)
 		rvd->vdev_stat.vs_calloc_smallblks += smallblks_alloc_delta;
 
@@ -3572,9 +3574,11 @@ vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
 }
 
 boolean_t
-vdev_category_space_full(vdev_t *vd, metaslab_block_category_t category,
-    int64_t request)
+vdev_category_space_full(spa_t *spa, metaslab_block_category_t category,
+    uint64_t request)
 {
+	vdev_t *rvd = spa->spa_root_vdev;
+
 	/*
 	 * Note that we intentionally don't subtract here to derive
 	 * the free space. Total pool-wide allocations can exceed
@@ -3584,17 +3588,19 @@ vdev_category_space_full(vdev_t *vd, metaslab_block_category_t category,
 	 * used for soft limit checks.
 	 */
 	if (category == MS_CATEGORY_METADATA &&
-	    (vd->vdev_stat.vs_alloc_metadata + request) <
-	    vd->vdev_stat.vs_space_metadata)
+	    (rvd->vdev_stat.vs_alloc_metadata + request) <
+	    rvd->vdev_stat.vs_space_metadata)
 		return (B_FALSE);
 
-	if (category == MS_CATEGORY_SMALL &&
-	    (vd->vdev_stat.vs_calloc_smallblks + request) <
-	    vd->vdev_stat.vs_space_smallblks)
-		return (B_FALSE);
+	if (category == MS_CATEGORY_SMALL) {
+		uint64_t allocated = rvd->vdev_stat.vs_calloc_smallblks +
+		    spa_custom_class(spa)->mc_spa_sync_calloc;
+		if ((allocated + request) < rvd->vdev_stat.vs_space_smallblks)
+			return (B_FALSE);
+	}
 
 	if (category == MS_CATEGORY_REGULAR) {
-		metaslab_class_t *mc = spa_normal_class(vd->vdev_spa);
+		metaslab_class_t *mc = spa_normal_class(spa);
 
 		if ((metaslab_class_get_alloc(mc) + request) <
 		    metaslab_class_get_space(mc))

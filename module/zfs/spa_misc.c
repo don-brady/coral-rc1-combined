@@ -1746,30 +1746,28 @@ spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
 		if (spa->spa_custom_class->mc_rotor != NULL)
 			return (spa_custom_class(spa));
 	}
-	if (spa->spa_segregate_smallblks) {
+	if (spa->spa_custom_class->mc_rotor != NULL) {
 		/*
-		 * We are segregating small blocks
-		 *
-		 * Limit how many we allow into small block metaslabs and
-		 * allow large blocks to spill into those metaslabs when
+		 * Limit how many small blocks we place into the custom class.
+		 * Also allow large blocks to spill into the custom class when
 		 * the nomal class is full.
 		 */
 		if (size <= zfs_class_smallblk_limit) {
 			/*
 			 * Allow request if it will keep us under our soft limit
 			 */
-			if (!vdev_category_space_full(spa->spa_root_vdev,
-			    MS_CATEGORY_SMALL, size)) {
+			if (!vdev_category_space_full(spa, MS_CATEGORY_SMALL,
+			    size)) {
 				return (spa_custom_class(spa));
 			}
 		} else {
 			/*
 			 * Allow some large blocks to spill when normal is full
 			 */
-			if (vdev_category_space_full(spa->spa_root_vdev,
-			    MS_CATEGORY_REGULAR, size) &&
-			    !vdev_category_space_full(spa->spa_root_vdev,
-			    MS_CATEGORY_SMALL, size)) {
+			if (vdev_category_space_full(spa, MS_CATEGORY_REGULAR,
+			    size) &&
+			    !vdev_category_space_full(spa, MS_CATEGORY_SMALL,
+			    size)) {
 				return (spa_custom_class(spa));
 			}
 		}

@@ -4956,7 +4956,7 @@ print_category_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 
 	for (c = 0; c < children; c++) {
 		char *vname = zpool_vdev_name(g_zfs, zhp, child[c],
-		    cb->cb_name_flags | VDEV_NAME_ALLOC_BIAS);
+		    cb->cb_name_flags);
 		print_category_stats(zhp, vname, child[c], cb, depth + 2);
 		free(vname);
 	}

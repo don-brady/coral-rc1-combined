@@ -6650,7 +6650,7 @@ make_random_props(void)
 
 	/* With mirror or raidz configs, use segregation 20% of the time */
 	if ((ztest_opts.zo_raidz > 1 || ztest_opts.zo_mirrors > 1) &&
-	    ztest_random(1) == 0) {
+	    ztest_random(5) == 0) {
 		VERIFY(nvlist_add_uint64(props, "segregate_log", 1) == 0);
 		VERIFY(nvlist_add_uint64(props, "segregate_metadata", 1) == 0);
 		VERIFY(nvlist_add_uint64(props, "segregate_smallblks", 1) == 0);

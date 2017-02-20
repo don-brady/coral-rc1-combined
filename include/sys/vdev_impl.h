@@ -398,8 +398,8 @@ extern void vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
     int64_t metadata_space_delta, int64_t smallblks_alloc_delta,
     int64_t smallblks_space_delta, boolean_t in_class);
 
-boolean_t vdev_category_space_full(vdev_t *vd,
-    metaslab_block_category_t category, int64_t request);
+boolean_t vdev_category_space_full(spa_t *spa,
+    metaslab_block_category_t category, uint64_t request);
 
 #ifdef	__cplusplus
 }
