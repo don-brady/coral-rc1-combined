@@ -134,8 +134,8 @@ typedef enum vdev_alloc_bias {
 	VDEV_BIAS_LOG,		/* dedicated to ZIL data (SLOG) */
 	VDEV_BIAS_DEDUP,	/* dedicated to DDT data */
 	VDEV_BIAS_METADATA,	/* dedicated to metadata (DMU and MOS) */
-	VDEV_BIAS_SMALLBLKS,	/* dedicated to small blocks */
-	VDEV_BIAS_SEGREGATE,	/* segregated metaslabs into multiple groups */
+	VDEV_BIAS_SMALLBLKS,	/* dedicated to small blocks (<= 32K) */
+	VDEV_BIAS_SEGREGATE,	/* segregate metaslabs into multiple groups */
 } vdev_alloc_bias_t;
 
 
@@ -182,7 +182,7 @@ struct vdev {
 	uint64_t	vdev_ms_count;	/* number of metaslabs		*/
 	metaslab_group_t *vdev_mg;	/* primary metaslab group	*/
 	metaslab_group_t *vdev_log_mg;	/* optional log group		*/
-	metaslab_group_t *vdev_custom_mg; /* optional metadata group	*/
+	metaslab_group_t *vdev_custom_mg; /* optional metadata/smallblk	*/
 	metaslab_t	**vdev_ms;	/* metaslab array		*/
 	uint64_t	vdev_pending_fastwrite; /* allocated fastwrites */
 	txg_list_t	vdev_ms_list;	/* per-txg dirty metaslab lists	*/

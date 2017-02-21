@@ -4029,9 +4029,4 @@ MODULE_PARM_DESC(zfs_segregated_smallblks_percent,
 	"small block allocations. This also requires that the pool's "
 	"segregate_smallblks property be enabled");
 
-module_param(zfs_class_smallblk_limit, int, 0644);
-MODULE_PARM_DESC(zfs_class_smallblk_limit,
-	"The largest block size threshold for the small block allocation "
-	"class");
-
 #endif /* _KERNEL && HAVE_SPL */
