@@ -2114,14 +2114,9 @@ metaslab_activate(metaslab_t *msp, uint64_t activation_weight)
 static void
 metaslab_passivate(metaslab_t *msp, uint64_t weight)
 {
-	ASSERTV(uint64_t size = weight & ~METASLAB_WEIGHT_TYPE);
-
-	/*
-	 * If size < SPA_MINBLOCKSIZE, then we will not allocate from
-	 * this metaslab again.  In that case, it had better be empty,
-	 * or we would be leaving space on the table.
-	 */
 #if 1
+	uint64_t size = weight & ~METASLAB_WEIGHT_TYPE;
+
 	/* WIP DEBUGGING -- understand how we leave small amount here */
 	if (size < SPA_MINBLOCKSIZE && range_tree_space(msp->ms_tree) != 0)
 		cmn_err(CE_WARN, "metaslab space lost: range_tree_space = %d "
@@ -2130,6 +2125,14 @@ metaslab_passivate(metaslab_t *msp, uint64_t weight)
 		    (int)msp->ms_group->mg_vd->vdev_id, (int)msp->ms_id,
 		    (long long unsigned)size, (long long unsigned)weight);
 #else
+	ASSERTV(uint64_t size = weight & ~METASLAB_WEIGHT_TYPE);
+
+	/*
+	 * If size < SPA_MINBLOCKSIZE, then we will not allocate from
+	 * this metaslab again.  In that case, it had better be empty,
+	 * or we would be leaving space on the table.
+	 */
+
 	ASSERT(size >= SPA_MINBLOCKSIZE ||
 	    range_tree_space(msp->ms_tree) == 0);
 #endif
