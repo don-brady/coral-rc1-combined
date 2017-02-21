@@ -3058,11 +3058,6 @@ zio_dva_allocate(zio_t *zio)
 		error = metaslab_alloc(spa, mc, zio->io_size, bp,
 		    zio->io_prop.zp_copies, zio->io_txg, NULL, flags,
 		    &zio->io_alloc_list, zio);
-#if 0
-		/* DJB - TBD post an event when dedicated class is full */
-		zfs_ereport_post(FM_EREPORT_ZFS_CLASS_FULL, zio->io_spa,
-		    zio->io_vd, zio, 0, 0);
-#endif
 	}
 
 	if (error != 0) {
