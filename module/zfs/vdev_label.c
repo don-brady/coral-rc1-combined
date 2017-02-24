@@ -386,7 +386,7 @@ vdev_config_generate(spa_t *spa, vdev_t *vd, boolean_t getstats,
 
 	if (vd->vdev_nparity != 0) {
 		ASSERT(vd->vdev_ops == &vdev_raidz_ops ||
-		       vd->vdev_ops == &vdev_draid_ops);
+		    vd->vdev_ops == &vdev_draid_ops);
 
 		/*
 		 * Make sure someone hasn't managed to sneak a fancy new vdev
@@ -1232,8 +1232,10 @@ vdev_uberblock_sync(zio_t *zio, uberblock_t *ub, vdev_t *vd, int flags)
 	if (!vd->vdev_ops->vdev_op_leaf)
 		return;
 
-	/* HH: no need to sync ub on dspare - if dspare gets a ub sync, so
-	 * does the parent draid vdev */
+	/*
+	 * HH: no need to sync ub on dspare - if dspare gets a ub sync, so
+	 * does the parent draid vdev
+	 */
 	if (vd->vdev_ops == &vdev_draid_spare_ops)
 		return;
 

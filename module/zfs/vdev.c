@@ -148,7 +148,8 @@ vdev_get_min_asize(vdev_t *vd)
 		ASSERT(cfg != NULL);
 		ASSERT3U(pvd->vdev_nparity, ==, cfg->dcf_parity);
 		ASSERT3U(pvd->vdev_children, ==, cfg->dcf_children);
-		return pvd->vdev_min_asize / (pvd->vdev_children - cfg->dcf_spare);
+		return (pvd->vdev_min_asize /
+		    (pvd->vdev_children - cfg->dcf_spare));
 	}
 
 	return (pvd->vdev_min_asize);
@@ -495,7 +496,8 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 	ASSERT(nparity != -1ULL);
 
 	if (ops == &vdev_draid_ops) {
-		if (nvlist_lookup_nvlist(nv, ZPOOL_CONFIG_DRAIDCFG, &draidcfg) != 0)
+		if (nvlist_lookup_nvlist(nv,
+		    ZPOOL_CONFIG_DRAIDCFG, &draidcfg) != 0)
 			return (SET_ERROR(EINVAL));
 		if (!vdev_draid_config_validate(NULL, draidcfg))
 			return (SET_ERROR(EINVAL));
@@ -3162,10 +3164,12 @@ vdev_stat_update(zio_t *zio, uint64_t psize)
 		vs->vs_write_errors++;
 	mutex_exit(&vd->vdev_stat_lock);
 
-	if (type == ZIO_TYPE_WRITE && vd->vdev_ops != &vdev_draid_spare_ops && txg != 0 &&
+	/* HH: todo proper rebuild IO error handling... */
+	if (type == ZIO_TYPE_WRITE && vd->vdev_ops != &vdev_draid_spare_ops &&
+	    txg != 0 &&
 	    (!(flags & ZIO_FLAG_IO_REPAIR) ||
-	     /* HH: todo proper rebuild IO error handling... */
-	    ((flags & ZIO_FLAG_SCAN_THREAD) && !spa->spa_dsl_pool->dp_scan->scn_is_sequential) ||
+	    ((flags & ZIO_FLAG_SCAN_THREAD) &&
+	    !spa->spa_dsl_pool->dp_scan->scn_is_sequential) ||
 	    spa->spa_claiming)) {
 		/*
 		 * This is either a normal write (not a repair), or it's

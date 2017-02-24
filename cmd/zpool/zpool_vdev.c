@@ -1569,14 +1569,20 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				if (strcmp(type, VDEV_TYPE_DRAID) == 0 &&
 				    strncmp(argv[c], "cfg=", 4) == 0) {
 					if (draidcfg == NULL) {
-						draidcfg = draidcfg_read_file(argv[c] + 4);
+						draidcfg =
+						    draidcfg_read_file(argv[c]
+						    + 4);
 						if (draidcfg != NULL)
 							continue;
-						(void) fprintf(stderr,
-							gettext("invalid draid configuration '%s'\n"), argv[c]);
+						fprintf(stderr,
+						    gettext("invalid draid "
+						    "configuration '%s'\n"),
+						    argv[c]);
 					} else {
-						(void) fprintf(stderr, gettext("dRAID config "
-						    "specified more than once: %s\n"), argv[c]);
+						fprintf(stderr,
+						    gettext("dRAID config "
+						    "specified more than "
+						    "once: %s\n"), argv[c]);
 					}
 
 					for (c = 0; c < children - 1; c++)
@@ -1656,10 +1662,13 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				free(child);
 
 				if (draidcfg != NULL) {
-					assert(strcmp(type, VDEV_TYPE_DRAID) == 0);
+					ASSERT0(strcmp(type, VDEV_TYPE_DRAID));
 
-					if (!vdev_draid_config_add(nv, draidcfg))
-						(void) fprintf(stderr, gettext("ignoring invalid draid config\n"));
+					if (!vdev_draid_config_add(nv,
+					    draidcfg))
+						fprintf(stderr,
+						    gettext("ignoring invalid "
+						    "draid config\n"));
 
 					nvlist_free(draidcfg);
 					draidcfg = NULL;

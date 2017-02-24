@@ -84,13 +84,13 @@ fnvlist_pack_enc(nvlist_t *nvl, size_t *sizep, int encoding)
 char *
 fnvlist_pack(nvlist_t *nvl, size_t *sizep)
 {
-	return fnvlist_pack_enc(nvl, sizep, NV_ENCODE_NATIVE);
+	return (fnvlist_pack_enc(nvl, sizep, NV_ENCODE_NATIVE));
 }
 
 char *
 fnvlist_pack_xdr(nvlist_t *nvl, size_t *sizep)
 {
-	return fnvlist_pack_enc(nvl, sizep, NV_ENCODE_XDR);
+	return (fnvlist_pack_enc(nvl, sizep, NV_ENCODE_XDR));
 }
 
 /*ARGSUSED*/

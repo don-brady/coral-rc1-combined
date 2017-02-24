@@ -1865,7 +1865,7 @@ static int zfs_no_resilver_skip = 1;
 
 static boolean_t
 dsl_scan_need_resilver(spa_t *spa, const dva_t *dva,
-		       size_t size, uint64_t phys_birth)
+    size_t size, uint64_t phys_birth)
 {
 	vdev_t *vd;
 	uint64_t offset;
@@ -1950,7 +1950,7 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 		/* if it's a resilver, this may not be in the target range */
 		if (!needs_io)
 			needs_io = dsl_scan_need_resilver(spa, dva,
-							  size, phys_birth);
+			    size, phys_birth);
 	}
 
 	if (needs_io && !zfs_no_scrub_io) {
@@ -2031,7 +2031,8 @@ module_param(zfs_resilver_min_time_ms, int, 0644);
 MODULE_PARM_DESC(zfs_resilver_min_time_ms, "Min millisecs to resilver per txg");
 
 module_param(zfs_no_resilver_skip, int, 0644);
-MODULE_PARM_DESC(zfs_no_resilver_skip, "Set to disable skipping spurious resilver IO");
+MODULE_PARM_DESC(zfs_no_resilver_skip,
+	"Set to disable skipping spurious resilver IO");
 
 module_param(zfs_no_scrub_io, int, 0644);
 MODULE_PARM_DESC(zfs_no_scrub_io, "Set to disable scrub I/O");

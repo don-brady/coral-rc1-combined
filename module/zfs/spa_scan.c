@@ -40,7 +40,7 @@ spa_scan_done(zio_t *zio)
 	ASSERT(zio->io_bp != NULL);
 
 	abd_free(zio->io_abd);
-	kmem_free(zio->io_private, sizeof(blkptr_t));
+	kmem_free(zio->io_private, sizeof (blkptr_t));
 
 	scn->scn_phys.scn_examined += DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
 	spa->spa_scan_pass_exam += DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
@@ -64,24 +64,27 @@ static void
 spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 {
 	/* HH: maybe bp can be on the stack */
-	blkptr_t *bp = kmem_alloc(sizeof(*bp), KM_SLEEP);
+	blkptr_t *bp = kmem_alloc(sizeof (*bp), KM_SLEEP);
 	dva_t *dva = bp->blk_dva;
 	uint64_t psize;
 	spa_t *spa = vd->vdev_spa;
+	ASSERTV(uint64_t ashift = vd->vdev_top->vdev_ashift);
 
-	ASSERT(vd->vdev_ops == &vdev_draid_ops || vd->vdev_ops == &vdev_mirror_ops);
+	ASSERT(vd->vdev_ops == &vdev_draid_ops ||
+	    vd->vdev_ops == &vdev_mirror_ops);
 
 	if (vd->vdev_ops == &vdev_mirror_ops) {
 		psize = asize;
 		ASSERT3U(asize, ==, vdev_psize_to_asize(vd, psize));
 	} else if (vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift)) {
-		ASSERT0((asize >> vd->vdev_top->vdev_ashift) % (1 + vd->vdev_nparity));
+		ASSERT0((asize >> ashift) % (1 + vd->vdev_nparity));
 		psize = asize / (1 + vd->vdev_nparity);
 	} else {
 		struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 
-		ASSERT0((asize >> vd->vdev_top->vdev_ashift) % (cfg->dcf_data + vd->vdev_nparity));
-		psize = (asize / (cfg->dcf_data + vd->vdev_nparity)) * cfg->dcf_data;
+		ASSERT0((asize >> ashift) % (cfg->dcf_data + vd->vdev_nparity));
+		psize = (asize / (cfg->dcf_data + vd->vdev_nparity)) *
+		    cfg->dcf_data;
 	}
 
 	mutex_enter(&spa->spa_scrub_lock);
@@ -108,9 +111,9 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 	BP_SET_BYTEORDER(bp, ZFS_HOST_BYTEORDER);
 
 	zio_nowait(zio_read(pio, spa, bp,
-		   abd_alloc(psize, B_FALSE), psize,
-		   spa_scan_done, bp, ZIO_PRIORITY_SCRUB,
-		   ZIO_FLAG_SCAN_THREAD | ZIO_FLAG_RAW | ZIO_FLAG_CANFAIL | ZIO_FLAG_RESILVER, NULL));
+	    abd_alloc(psize, B_FALSE), psize, spa_scan_done, bp,
+	    ZIO_PRIORITY_SCRUB, ZIO_FLAG_SCAN_THREAD | ZIO_FLAG_RAW |
+	    ZIO_FLAG_CANFAIL | ZIO_FLAG_RESILVER, NULL));
 }
 
 static void
@@ -150,7 +153,8 @@ spa_scan_thread(void *arg)
 	uint64_t msi;
 	int err;
 
-	/* Wait for newvd's DTL to propagate upward when
+	/*
+	 * Wait for newvd's DTL to propagate upward when
 	 * spa_vdev_exit() calls vdev_dtl_reassess().
 	 */
 	txg_wait_synced(spa->spa_dsl_pool, sscan->ssa_dtl_max);
@@ -213,7 +217,8 @@ spa_scan_thread(void *arg)
 			 * When we are resuming from a paused removal (i.e.
 			 * when importing a pool with a removal in progress),
 			 * discard any state that we have already processed.
-			range_tree_clear(svr->svr_allocd_segs, 0, start_offset);
+			 * range_tree_clear(svr->svr_allocd_segs, 0,
+			 * start_offset);
 			 */
 		}
 		mutex_exit(&msp->ms_lock);
@@ -234,7 +239,8 @@ spa_scan_thread(void *arg)
 			range_tree_remove(allocd_segs, offset, length);
 			mutex_exit(&lock);
 
-			draid_dbg(1, "MS ("U64FMT" at "U64FMT"K) segment: "U64FMT"K + "U64FMT"K\n",
+			draid_dbg(1, "MS ("U64FMT" at "U64FMT"K) segment: "
+			    U64FMT"K + "U64FMT"K\n",
 			    msp->ms_id, msp->ms_start >> 10,
 			    (offset - msp->ms_start) >> 10, length >> 10);
 
@@ -251,19 +257,29 @@ spa_scan_thread(void *arg)
 				uint64_t group, group_left, chunksz;
 				char *action = "Skipping";
 
-				/* HH: make sure we don't cross redundancy group boundary */
-				group = vdev_draid_offset2group(vd, offset, mirror);
-				group_left = vdev_draid_group2offset(vd, group + 1, mirror) - offset;
-				ASSERT(!vdev_draid_is_remainder_group(vd, group, mirror));
-				ASSERT3U(group_left, <=, vdev_draid_get_groupsz(vd, mirror));
+				/*
+				 * HH: make sure we don't cross redundancy
+				 * group boundary
+				 */
+				group =
+				    vdev_draid_offset2group(vd, offset, mirror);
+				group_left = vdev_draid_group2offset(vd,
+				    group + 1, mirror) - offset;
+				ASSERT(!vdev_draid_is_remainder_group(vd,
+				    group, mirror));
+				ASSERT3U(group_left, <=,
+				    vdev_draid_get_groupsz(vd, mirror));
 
 				chunksz = MIN(length, group_left);
-				if (vdev_draid_group_degraded(vd, sscan->ssa_vd, offset, chunksz, mirror)) {
+				if (vdev_draid_group_degraded(vd,
+				    sscan->ssa_vd, offset, chunksz, mirror)) {
 					action = "Fixing";
-					spa_scan_rebuild(pio, vd, offset, chunksz);
+					spa_scan_rebuild(pio, vd,
+					    offset, chunksz);
 				}
 
-				draid_dbg(1, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
+				draid_dbg(1, "\t%s: "U64FMT"K + "U64FMT
+				    "K (%s)\n",
 				    action, offset >> 10, chunksz >> 10,
 				    mirror ? "mirrored" : "dRAID");
 
@@ -285,7 +301,7 @@ spa_scan_thread(void *arg)
 
 	range_tree_destroy(allocd_segs);
 	mutex_destroy(&lock);
-	kmem_free(sscan, sizeof(*sscan));
+	kmem_free(sscan, sizeof (*sscan));
 
 	err = zio_wait(pio);
 	if (err != 0) /* HH: handle error */
@@ -304,11 +320,11 @@ spa_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t txg)
 	scan->scn_restart_txg = txg;
 	scan->scn_is_sequential = B_TRUE;
 
-	sscan_arg = kmem_alloc(sizeof(*sscan_arg), KM_SLEEP);
+	sscan_arg = kmem_alloc(sizeof (*sscan_arg), KM_SLEEP);
 	sscan_arg->ssa_vd = oldvd;
 	sscan_arg->ssa_dtl_max = txg;
 	(void) thread_create(NULL, 0, spa_scan_thread, sscan_arg, 0, NULL,
-			TS_RUN, defclsyspri);
+	    TS_RUN, defclsyspri);
 }
 
 void

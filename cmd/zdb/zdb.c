@@ -809,7 +809,7 @@ dump_metaslab(metaslab_t *msp)
 
 	if (dump_opt['d'] > 5 || dump_opt['m'] > 3) {
 		ASSERT(msp->ms_size == (1ULL << vd->vdev_ms_shift) ||
-		       vd->vdev_ops == &vdev_draid_ops);
+		    vd->vdev_ops == &vdev_draid_ops);
 
 		mutex_enter(&msp->ms_lock);
 		dump_spacemap(spa->spa_meta_objset, msp->ms_sm);

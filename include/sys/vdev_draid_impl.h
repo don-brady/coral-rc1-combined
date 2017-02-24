@@ -23,7 +23,7 @@
  */
 
 #ifndef _VDEV_DRAID_IMPL_H
-#define _VDEV_DRAID_IMPL_H
+#define	_VDEV_DRAID_IMPL_H
 
 #include <sys/types.h>
 #include <sys/abd.h>
@@ -48,12 +48,14 @@ struct vdev_draid_configuration {
 };
 
 extern boolean_t vdev_draid_ms_mirrored(const vdev_t *, uint64_t);
-extern boolean_t vdev_draid_group_degraded(vdev_t *, vdev_t *, uint64_t, uint64_t, boolean_t);
+extern boolean_t vdev_draid_group_degraded(vdev_t *, vdev_t *,
+    uint64_t, uint64_t, boolean_t);
 extern uint64_t vdev_draid_check_block(const vdev_t *vd, uint64_t, uint64_t);
 extern uint64_t vdev_draid_get_astart(const vdev_t *, const uint64_t);
 extern uint64_t vdev_draid_offset2group(const vdev_t *, uint64_t, boolean_t);
 extern uint64_t vdev_draid_group2offset(const vdev_t *, uint64_t, boolean_t);
-extern boolean_t vdev_draid_is_remainder_group(const vdev_t *, uint64_t, boolean_t);
+extern boolean_t vdev_draid_is_remainder_group(const vdev_t *,
+    uint64_t, boolean_t);
 extern uint64_t vdev_draid_get_groupsz(const vdev_t *, boolean_t);
 extern boolean_t vdev_draid_config_validate(const vdev_t *, nvlist_t *);
 extern boolean_t vdev_draid_config_add(nvlist_t *, nvlist_t *);
@@ -66,34 +68,34 @@ extern boolean_t vdev_draid_missing(vdev_t *, uint64_t, uint64_t, uint64_t);
 extern vdev_t *vdev_draid_spare_get_parent(vdev_t *);
 extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
 
-#define VDEV_DRAID_MAX_CHILDREN	255
-#define VDEV_DRAID_U8_MAX	((uint8_t) -1)
+#define	VDEV_DRAID_MAX_CHILDREN	255
+#define	VDEV_DRAID_U8_MAX	((uint8_t)-1)
 
-#define VDEV_DRAID_SPARE_PATH_FMT "$"VDEV_TYPE_DRAID"%lu-%lu-s%lu"
+#define	VDEV_DRAID_SPARE_PATH_FMT "$"VDEV_TYPE_DRAID"%lu-%lu-s%lu"
 
 /* trace_printk is GPL only */
-#define DRAID_USE_TRACE_PRINTK
+#define	DRAID_USE_TRACE_PRINTK
 
 #ifdef _KERNEL
-# define U64FMT "%llu"
-# ifdef DRAID_USE_TRACE_PRINTK
-#  define draid_print(fmt, ...) trace_printk(fmt, ##__VA_ARGS__)
-# else
-#  define draid_print(fmt, ...) printk(fmt, ##__VA_ARGS__)
-# endif
+#define	U64FMT "%llu"
+#ifdef DRAID_USE_TRACE_PRINTK
+#define	draid_print(fmt, ...) trace_printk(fmt, ##__VA_ARGS__)
 #else
-# define U64FMT "%lu"
-# define draid_print(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define	draid_print(fmt, ...) printk(fmt, ##__VA_ARGS__)
+#endif
+#else
+#define	U64FMT "%lu"
+#define	draid_print(fmt, ...) printf(fmt, ##__VA_ARGS__)
 #endif
 
 extern int draid_debug_lvl;
 extern void vdev_draid_debug_zio(zio_t *, boolean_t);
 
-#define draid_dbg(lvl, fmt, ...) \
-       do { \
-               if (draid_debug_lvl >= (lvl)) \
-                       draid_print(fmt, ##__VA_ARGS__); \
-       } while (0);
+#define	draid_dbg(lvl, fmt, ...) \
+	do { \
+		if (draid_debug_lvl >= (lvl)) \
+			draid_print(fmt, ##__VA_ARGS__); \
+	} while (0);
 
 
 #ifdef  __cplusplus

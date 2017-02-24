@@ -37,7 +37,8 @@ extern "C" {
 extern boolean_t spa_scan_enabled(const spa_t *);
 extern void spa_scan_setup_sync(dmu_tx_t *);
 extern void spa_scan_start(spa_t *, vdev_t *, uint64_t);
-extern int spa_scan_rebuild_cb(dsl_pool_t *, const blkptr_t *, const zbookmark_phys_t *);
+extern int spa_scan_rebuild_cb(dsl_pool_t *,
+    const blkptr_t *, const zbookmark_phys_t *);
 
 #ifdef	__cplusplus
 }

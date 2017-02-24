@@ -3774,7 +3774,7 @@ spa_add_draid_spare(nvlist_t *nvroot, vdev_t *rvd)
 	    &oldspares, &nspares) != 0)
 		nspares = 0;
 
-	newspares = kmem_alloc(sizeof(*newspares) * (n + nspares), KM_SLEEP);
+	newspares = kmem_alloc(sizeof (*newspares) * (n + nspares), KM_SLEEP);
 	for (i = 0; i < nspares; i++)
 		newspares[i] = fnvlist_dup(oldspares[i]);
 
@@ -3789,15 +3789,17 @@ spa_add_draid_spare(nvlist_t *nvroot, vdev_t *rvd)
 			nvlist_t *ds = fnvlist_alloc();
 			char path[64];
 
-			snprintf(path, sizeof(path), VDEV_DRAID_SPARE_PATH_FMT,
-				 (long unsigned)c->vdev_nparity,
-				 (long unsigned)c->vdev_id, (long unsigned)j);
+			snprintf(path, sizeof (path), VDEV_DRAID_SPARE_PATH_FMT,
+			    (long unsigned)c->vdev_nparity,
+			    (long unsigned)c->vdev_id, (long unsigned)j);
 			fnvlist_add_string(ds, ZPOOL_CONFIG_PATH, path);
-			fnvlist_add_string(ds, ZPOOL_CONFIG_TYPE, VDEV_TYPE_DRAID_SPARE);
+			fnvlist_add_string(ds,
+			    ZPOOL_CONFIG_TYPE, VDEV_TYPE_DRAID_SPARE);
 			fnvlist_add_uint64(ds, ZPOOL_CONFIG_IS_LOG, 0);
 			fnvlist_add_uint64(ds, ZPOOL_CONFIG_IS_SPARE, 1);
 			fnvlist_add_uint64(ds, ZPOOL_CONFIG_WHOLE_DISK, 1);
-			fnvlist_add_uint64(ds, ZPOOL_CONFIG_ASHIFT, c->vdev_ashift);
+			fnvlist_add_uint64(ds,
+			    ZPOOL_CONFIG_ASHIFT, c->vdev_ashift);
 
 			newspares[n] = ds;
 			n++;
@@ -3808,7 +3810,7 @@ spa_add_draid_spare(nvlist_t *nvroot, vdev_t *rvd)
 	fnvlist_add_nvlist_array(nvroot, ZPOOL_CONFIG_SPARES, newspares, n);
 	for (i = 0; i < n; i++)
 		nvlist_free(newspares[i]);
-	kmem_free(newspares, sizeof(*newspares) * n);
+	kmem_free(newspares, sizeof (*newspares) * n);
 	return (0);
 }
 
@@ -3943,7 +3945,7 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 		VERIFY(nvlist_alloc(&spa->spa_spares.sav_config, NV_UNIQUE_NAME,
 		    KM_SLEEP) == 0);
 		VERIFY(nvlist_add_nvlist_array(spa->spa_spares.sav_config,
-					       ZPOOL_CONFIG_SPARES, spares, nspares) == 0);
+		    ZPOOL_CONFIG_SPARES, spares, nspares) == 0);
 		spa_config_enter(spa, SCL_ALL, FTAG, RW_WRITER);
 		spa_load_spares(spa);
 		spa_config_exit(spa, SCL_ALL, FTAG);
@@ -4678,8 +4680,10 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	if ((error = vdev_create(newrootvd, txg, replacing)) != 0)
 		return (spa_vdev_exit(spa, newrootvd, txg, error));
 
-	/* dRAID spare can only replace a child drive of its parent
-	 * dRAID vdev */
+	/*
+	 * dRAID spare can only replace a child drive of its parent
+	 * dRAID vdev
+	 */
 	if (newvd->vdev_ops == &vdev_draid_spare_ops &&
 	    oldvd->vdev_top != vdev_draid_spare_get_parent(newvd))
 		return (spa_vdev_exit(spa, newrootvd, txg, ENOTSUP));
@@ -4802,7 +4806,7 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	dtl_max_txg = txg + TXG_CONCURRENT_STATES;
 
 	vdev_dtl_dirty(newvd, DTL_MISSING,
-		       TXG_INITIAL, dtl_max_txg - TXG_INITIAL);
+	    TXG_INITIAL, dtl_max_txg - TXG_INITIAL);
 
 	if (newvd->vdev_isspare) {
 		spa_spare_activate(newvd);
@@ -4819,7 +4823,8 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	vdev_dirty(tvd, VDD_DTL, newvd, txg);
 
 	if (spa_scan_enabled(spa) &&
-	    (tvd->vdev_ops == &vdev_mirror_ops || newvd->vdev_ops == &vdev_draid_spare_ops))
+	    (tvd->vdev_ops == &vdev_mirror_ops ||
+	    newvd->vdev_ops == &vdev_draid_spare_ops))
 		rebuild = B_TRUE; /* HH: let zpool cmd choose */
 
 	/*

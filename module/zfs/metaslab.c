@@ -1129,7 +1129,8 @@ metaslab_block_picker(metaslab_t *msp, avl_tree_t *t, uint64_t *cursor,
 
 			offset = P2ROUNDUP(next_offset, align);
 			if (offset + size <= rs->rs_end) {
-				ASSERT3U(offset, ==, vdev_draid_check_block(vd, offset, size));
+				ASSERT3U(offset, ==,
+				    vdev_draid_check_block(vd, offset, size));
 				*cursor = offset + size;
 				return (offset);
 			}
@@ -2762,8 +2763,9 @@ metaslab_block_alloc(metaslab_t *msp, uint64_t size, uint64_t txg)
 }
 
 static uint64_t
-metaslab_group_alloc_normal(metaslab_group_t *mg, zio_alloc_list_t *zal, uint64_t psize,
-    uint64_t asize, uint64_t txg, uint64_t min_distance, dva_t *dva, int d)
+metaslab_group_alloc_normal(metaslab_group_t *mg, zio_alloc_list_t *zal,
+    uint64_t psize, uint64_t asize, uint64_t txg, uint64_t min_distance,
+    dva_t *dva, int d)
 {
 	vdev_t *vd = mg->mg_vd;
 	metaslab_t *msp = NULL;
@@ -2823,7 +2825,8 @@ metaslab_group_alloc_normal(metaslab_group_t *mg, zio_alloc_list_t *zal, uint64_
 			}
 
 			if (vd->vdev_ops == &vdev_draid_ops &&
-			    hybrid_mirror != vdev_draid_ms_mirrored(vd, msp->ms_id))
+			    hybrid_mirror !=
+			    vdev_draid_ms_mirrored(vd, msp->ms_id))
 				continue;
 
 			/*
@@ -2968,8 +2971,9 @@ next:
 }
 
 static uint64_t
-metaslab_group_alloc(metaslab_group_t *mg, zio_alloc_list_t *zal, uint64_t psize,
-    uint64_t asize, uint64_t txg, uint64_t min_distance, dva_t *dva, int d)
+metaslab_group_alloc(metaslab_group_t *mg, zio_alloc_list_t *zal,
+    uint64_t psize, uint64_t asize, uint64_t txg, uint64_t min_distance,
+    dva_t *dva, int d)
 {
 	uint64_t offset;
 	ASSERT(mg->mg_initialized);
@@ -3167,8 +3171,8 @@ top:
 		asize = vdev_psize_to_asize(vd, psize);
 		ASSERT(P2PHASE(asize, 1ULL << vd->vdev_ashift) == 0);
 
-		offset = metaslab_group_alloc(mg, zal, psize, asize, txg, distance,
-		    dva, d);
+		offset = metaslab_group_alloc(mg, zal, psize, asize, txg,
+		    distance, dva, d);
 
 		if (offset != -1ULL) {
 			/*

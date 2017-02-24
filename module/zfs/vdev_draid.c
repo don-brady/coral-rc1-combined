@@ -82,8 +82,9 @@ vdev_draid_debug_zio(zio_t *zio, boolean_t mirror)
 				}
 			}
 
-			draid_dbg(3, "%c: dev %lu (%s) off %luK, sz %luK, err %d, skipped %d, tried %d\n",
-			    t, rc->rc_devidx, cvd->vdev_path != NULL ? cvd->vdev_path : "NA",
+			draid_dbg(3, "%c: dev %lu (%s) off %luK, sz %luK, "
+			    "err %d, skipped %d, tried %d\n", t, rc->rc_devidx,
+			    cvd->vdev_path != NULL ? cvd->vdev_path : "NA",
 			    rc->rc_offset >> 10, rc->rc_size >> 10,
 			    rc->rc_error, rc->rc_skipped, rc->rc_tried);
 		}
@@ -92,12 +93,14 @@ vdev_draid_debug_zio(zio_t *zio, boolean_t mirror)
 
 /* A child vdev is divided into slices */
 static unsigned int slice_shift = 0;
-#define DRAID_SLICESHIFT (SPA_MAXBLOCKSHIFT + slice_shift)
-#define	DRAID_SLICESIZE  (1ULL << DRAID_SLICESHIFT) /* 2 ** slice_shift * SPA_MAXBLOCKSIZE */
-#define DRAID_SLICEMASK  (DRAID_SLICESIZE - 1)
+#define	DRAID_SLICESHIFT (SPA_MAXBLOCKSHIFT + slice_shift)
+/* 2 ** slice_shift * SPA_MAXBLOCKSIZE */
+#define	DRAID_SLICESIZE  (1ULL << DRAID_SLICESHIFT)
+#define	DRAID_SLICEMASK  (DRAID_SLICESIZE - 1)
 
 static int
-vdev_draid_get_permutation(uint64_t *p, uint64_t nr, const struct vdev_draid_configuration *cfg)
+vdev_draid_get_permutation(uint64_t *p, uint64_t nr,
+    const struct vdev_draid_configuration *cfg)
 {
 	uint64_t i;
 	uint64_t ncols = cfg->dcf_children;
@@ -106,16 +109,18 @@ vdev_draid_get_permutation(uint64_t *p, uint64_t nr, const struct vdev_draid_con
 	uint64_t dev = off % ncols;
 
 	for (i = 0; i < ncols; i++) {
-		const uint64_t *base_perm = cfg->dcf_base_perms + (base * ncols);
+		const uint64_t *base_perm = cfg->dcf_base_perms +
+		    (base * ncols);
 
 		p[i] = (base_perm[i] + dev) % ncols;
 	}
 
-	return 0;
+	return (0);
 }
 
 noinline static raidz_map_t *
-vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_draid_configuration *cfg, uint64_t **array)
+vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift,
+    const struct vdev_draid_configuration *cfg, uint64_t **array)
 {
 	const uint64_t ndata = cfg->dcf_data;
 	const uint64_t nparity = cfg->dcf_parity;
@@ -132,13 +137,14 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_draid_co
 	uint64_t *permutation;
 	ASSERTV(vdev_t *vd = zio->io_vd);
 
-	ASSERT(!vdev_draid_ms_mirrored(vd, zio->io_offset >> vd->vdev_ms_shift));
+	ASSERT(!vdev_draid_ms_mirrored(vd,
+	    zio->io_offset >> vd->vdev_ms_shift));
 	ASSERT3U(ncols % (nparity + ndata), ==, nspare);
 	ASSERT0(b % (nparity + ndata));
 	ASSERT0(P2PHASE(DRAID_SLICESIZE, 1ULL << unit_shift));
 
 	/* HH: may not actually need the nspare columns for normal IO */
-	permutation = kmem_alloc(sizeof(permutation[0]) * ncols, KM_SLEEP);
+	permutation = kmem_alloc(sizeof (permutation[0]) * ncols, KM_SLEEP);
 
 	perm = b / ((ncols - nspare) * slice);
 	perm_off = b % ((ncols - nspare) * slice);
@@ -158,7 +164,7 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_draid_co
 	 */
 	q = psize / ndata;
 
-	/* 
+	/*
 	 * "Remainder": The number of partial stripe data sectors in this I/O.
 	 * This will add a sector to some, but not all, child vdevs.
 	 */
@@ -234,10 +240,12 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_draid_co
 	    (zio->io_flags & (ZIO_FLAG_SCRUB | ZIO_FLAG_RESILVER)) == 0)
 		rm->rm_abd_skip = NULL;
 	else
-		rm->rm_abd_skip = abd_alloc_linear(rm->rm_nskip << unit_shift, B_TRUE);
+		rm->rm_abd_skip =
+		    abd_alloc_linear(rm->rm_nskip << unit_shift, B_TRUE);
 
 	for (c = 0; c < rm->rm_firstdatacol; c++)
-		rm->rm_col[c].rc_abd = abd_alloc_linear(rm->rm_col[c].rc_size, B_TRUE);
+		rm->rm_col[c].rc_abd =
+		    abd_alloc_linear(rm->rm_col[c].rc_size, B_TRUE);
 
 	abd_off = 0;
 	rm->rm_col[c].rc_abd = abd_get_offset(zio->io_abd, abd_off);
@@ -249,7 +257,7 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_draid_co
 	}
 
 	if (array == NULL)
-		kmem_free(permutation, sizeof(permutation[0]) * ncols);
+		kmem_free(permutation, sizeof (permutation[0]) * ncols);
 	else
 		*array = permutation; /* caller will free */
 	rm->rm_ops = vdev_raidz_math_get_ops();
@@ -259,7 +267,8 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_draid_co
 }
 
 noinline static mirror_map_t *
-vdev_draid_mirror_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_draid_configuration *cfg, uint64_t **array)
+vdev_draid_mirror_map_alloc(zio_t *zio, uint64_t unit_shift,
+    const struct vdev_draid_configuration *cfg, uint64_t **array)
 {
 	const uint64_t nparity = cfg->dcf_parity;
 	const uint64_t copies = nparity + 1;
@@ -289,7 +298,7 @@ vdev_draid_mirror_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_d
 	o = (perm * slice + group_offset / copies) << unit_shift;
 
 	mm = vdev_mirror_map_alloc(copies, B_FALSE, B_FALSE);
-	permutation = kmem_alloc(sizeof(permutation[0]) * ncols, KM_SLEEP);
+	permutation = kmem_alloc(sizeof (permutation[0]) * ncols, KM_SLEEP);
 	VERIFY0(vdev_draid_get_permutation(permutation, perm, cfg));
 
 	for (c = 0; c < mm->mm_children; c++) {
@@ -304,7 +313,7 @@ vdev_draid_mirror_map_alloc(zio_t *zio, uint64_t unit_shift, const struct vdev_d
 	}
 
 	if (array == NULL)
-		kmem_free(permutation, sizeof(permutation[0]) * ncols);
+		kmem_free(permutation, sizeof (permutation[0]) * ncols);
 	else
 		*array = permutation; /* caller will free */
 
@@ -333,13 +342,14 @@ vdev_draid_get_groupsz(const vdev_t *vd, boolean_t mirror)
 
 	vdev_draid_assert_vd(vd);
 
-	copies = mirror ? vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
+	copies = mirror ?
+	    vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
 	return (copies << DRAID_SLICESHIFT);
 }
 
-#define DRAID_PERM_ASIZE(vd) (((vd)->vdev_children - \
-			((struct vdev_draid_configuration *)(vd)->vdev_tsd)->dcf_spare) \
-			<< DRAID_SLICESHIFT)
+#define	DRAID_PERM_ASIZE(vd) (((vd)->vdev_children - \
+	((struct vdev_draid_configuration *)(vd)->vdev_tsd)->dcf_spare) \
+	<< DRAID_SLICESHIFT)
 
 uint64_t
 vdev_draid_offset2group(const vdev_t *vd, uint64_t offset, boolean_t mirror)
@@ -353,8 +363,10 @@ vdev_draid_offset2group(const vdev_t *vd, uint64_t offset, boolean_t mirror)
 	perm_off = offset % DRAID_PERM_ASIZE(vd);
 	group = perm_off / vdev_draid_get_groupsz(vd, mirror);
 
-	copies = mirror ? vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
-	groups_per_perm = (vd->vdev_children - cfg->dcf_spare + copies - 1) / copies;
+	copies = mirror ?
+	    vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
+	groups_per_perm = (vd->vdev_children - cfg->dcf_spare + copies - 1)
+	    / copies;
 
 	return (perm * groups_per_perm + group);
 }
@@ -367,24 +379,30 @@ vdev_draid_group2offset(const vdev_t *vd, uint64_t group, boolean_t mirror)
 
 	vdev_draid_assert_vd(vd);
 
-	copies = mirror ? vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
-	groups_per_perm = (vd->vdev_children - cfg->dcf_spare + copies - 1) / copies;
+	copies = mirror ?
+	    vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
+	groups_per_perm = (vd->vdev_children - cfg->dcf_spare + copies - 1)
+	    / copies;
 
 	offset = DRAID_PERM_ASIZE(vd) * (group / groups_per_perm);
-	offset += vdev_draid_get_groupsz(vd, mirror) * (group % groups_per_perm);
+	offset +=
+	    vdev_draid_get_groupsz(vd, mirror) * (group % groups_per_perm);
 	return (offset);
 }
 
 boolean_t
-vdev_draid_is_remainder_group(const vdev_t *vd, uint64_t group, boolean_t mirror)
+vdev_draid_is_remainder_group(const vdev_t *vd,
+    uint64_t group, boolean_t mirror)
 {
 	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 	uint64_t copies, groups_per_perm;
 
 	vdev_draid_assert_vd(vd);
 
-	copies = mirror ? vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
-	groups_per_perm = (vd->vdev_children - cfg->dcf_spare + copies - 1) / copies;
+	copies = mirror ?
+	    vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
+	groups_per_perm = (vd->vdev_children - cfg->dcf_spare + copies - 1)
+	    / copies;
 
 	if ((vd->vdev_children - cfg->dcf_spare) % copies == 0)
 		return (B_FALSE);
@@ -403,7 +421,8 @@ uint64_t
 vdev_draid_get_astart(const vdev_t *vd, const uint64_t start)
 {
 	uint64_t astart, perm_off, copies;
-	boolean_t mirror = vdev_draid_ms_mirrored(vd, start >> vd->vdev_ms_shift);
+	boolean_t mirror =
+	    vdev_draid_ms_mirrored(vd, start >> vd->vdev_ms_shift);
 	uint64_t group = vdev_draid_offset2group(vd, start, mirror);
 	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 
@@ -413,7 +432,8 @@ vdev_draid_get_astart(const vdev_t *vd, const uint64_t start)
 		return (start);
 
 	perm_off = start % DRAID_PERM_ASIZE(vd);
-	copies = mirror ? vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
+	copies = mirror ?
+	    vd->vdev_nparity + 1 : vd->vdev_nparity + cfg->dcf_data;
 	astart = roundup(perm_off, copies << vd->vdev_ashift);
 	astart += start - perm_off;
 
@@ -424,21 +444,23 @@ vdev_draid_get_astart(const vdev_t *vd, const uint64_t start)
 uint64_t
 vdev_draid_check_block(const vdev_t *vd, uint64_t start, uint64_t size)
 {
-	boolean_t mirror = vdev_draid_ms_mirrored(vd, start >> vd->vdev_ms_shift);
+	boolean_t mirror =
+	    vdev_draid_ms_mirrored(vd, start >> vd->vdev_ms_shift);
 	uint64_t group = vdev_draid_offset2group(vd, start, mirror);
 	uint64_t end = start + size - 1;
 
 	ASSERT3U(size, <, vdev_draid_get_groupsz(vd, mirror));
 	ASSERT3U(start >> vd->vdev_ms_shift, ==, end >> vd->vdev_ms_shift);
 
-	/* A block is good if it:
+	/*
+	 * A block is good if it:
 	 * - does not cross group boundary, AND
 	 * - does not use a remainder group
 	 */
 	if (group == vdev_draid_offset2group(vd, end, mirror) &&
 	    !vdev_draid_is_remainder_group(vd, group, mirror)) {
 		ASSERT3U(start, ==, vdev_draid_get_astart(vd, start));
-		return start;
+		return (start);
 	}
 
 	group++;
@@ -574,7 +596,8 @@ vdev_draid_vd_degraded(vdev_t *vd, const vdev_t *oldvd, uint64_t offset)
 }
 
 boolean_t
-vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t size, boolean_t mirror)
+vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd,
+    uint64_t offset, uint64_t size, boolean_t mirror)
 {
 	uint64_t ashift = vd->vdev_top->vdev_ashift;
 	uint64_t group = vdev_draid_offset2group(vd, offset, mirror);
@@ -588,7 +611,7 @@ vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t s
 	vdev_draid_assert_vd(vd);
 	ASSERT(!vdev_draid_is_remainder_group(vd, group, mirror));
 
-	zio = kmem_alloc(sizeof(*zio), KM_SLEEP);
+	zio = kmem_alloc(sizeof (*zio), KM_SLEEP);
 	zio->io_vd = vd;
 	zio->io_offset = offset;
 	zio->io_size = MAX(SPA_MINBLOCKSIZE, 1ULL << ashift);
@@ -596,7 +619,8 @@ vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t s
 
 	buf[0] = '\0';
 	if (mirror) {
-		mirror_map_t *mm = vdev_draid_mirror_map_alloc(zio, ashift, cfg, &perm);
+		mirror_map_t *mm =
+		    vdev_draid_mirror_map_alloc(zio, ashift, cfg, &perm);
 
 		ASSERT3U(mm->mm_children, ==, cfg->dcf_parity + 1);
 
@@ -604,11 +628,12 @@ vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t s
 			mirror_child_t *mc = &mm->mm_child[c];
 			char *status = "";
 
-			if (vdev_draid_vd_degraded(mc->mc_vd, oldvd, mc->mc_offset)) {
+			if (vdev_draid_vd_degraded(mc->mc_vd,
+			    oldvd, mc->mc_offset)) {
 				degraded = B_TRUE;
 				status = "*";
 			}
-			snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
+			snprintf(buf + strlen(buf), sizeof (buf) - strlen(buf),
 			    U64FMT"%s ", mc->mc_vd->vdev_id, status);
 		}
 	} else {
@@ -625,25 +650,25 @@ vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t s
 				degraded = B_TRUE;
 				status = "*";
 			}
-			snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
+			snprintf(buf + strlen(buf), sizeof (buf) - strlen(buf),
 			    U64FMT"%s ", cvd->vdev_id, status);
 		}
 	}
 
-	snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "spares: ");
+	snprintf(buf + strlen(buf), sizeof (buf) - strlen(buf), "spares: ");
 	for (c = 0; c < cfg->dcf_spare; c++)
-		snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
+		snprintf(buf + strlen(buf), sizeof (buf) - strlen(buf),
 		    U64FMT" ", perm[cfg->dcf_children - 1 - c]);
 	draid_dbg(4, "%s %s at "U64FMT"K of "U64FMT"K: %s\n",
 	    degraded ? "Degraded" : "Healthy",
 	    mirror ? "mirror" : "draid",
 	    offset >> 10, size >> 10, buf);
 
-	kmem_free(perm, sizeof(perm[0]) * cfg->dcf_children);
+	kmem_free(perm, sizeof (perm[0]) * cfg->dcf_children);
 	(*zio->io_vsd_ops->vsd_free)(zio);
 	abd_put(zio->io_abd);
-	kmem_free(zio, sizeof(*zio));
-	return degraded;
+	kmem_free(zio, sizeof (*zio));
+	return (degraded);
 }
 
 boolean_t
@@ -654,9 +679,11 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 	uint8_t *perm = NULL;
 	uint64_t n, d, p, s, b;
 
-	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_CHILDREN, &n) != 0) {
+	if (nvlist_lookup_uint64(config,
+	    ZPOOL_CONFIG_DRAIDCFG_CHILDREN, &n) != 0) {
 #ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_CHILDREN);
+		fprintf(stderr, "Missing %s in configuration\n",
+		    ZPOOL_CONFIG_DRAIDCFG_CHILDREN);
 #endif
 		return (B_FALSE);
 	}
@@ -671,9 +698,11 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 	if (vd != NULL && n != vd->vdev_children)
 		return (B_FALSE);
 
-	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_PARITY, &p) != 0) {
+	if (nvlist_lookup_uint64(config,
+	    ZPOOL_CONFIG_DRAIDCFG_PARITY, &p) != 0) {
 #ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_PARITY);
+		fprintf(stderr, "Missing %s in configuration\n",
+		    ZPOOL_CONFIG_DRAIDCFG_PARITY);
 #endif
 		return (B_FALSE);
 	}
@@ -683,21 +712,25 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 
 	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_DATA, &d) != 0) {
 #ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_DATA);
+		fprintf(stderr, "Missing %s in configuration\n",
+		    ZPOOL_CONFIG_DRAIDCFG_DATA);
 #endif
 		return (B_FALSE);
 	}
 
-	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_SPARE, &s) != 0) {
+	if (nvlist_lookup_uint64(config,
+	    ZPOOL_CONFIG_DRAIDCFG_SPARE, &s) != 0) {
 #ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_SPARE);
+		fprintf(stderr, "Missing %s in configuration\n",
+		    ZPOOL_CONFIG_DRAIDCFG_SPARE);
 #endif
 		return (B_FALSE);
 	}
 
 	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_BASE, &b) != 0) {
 #ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_BASE);
+		fprintf(stderr, "Missing %s in configuration\n",
+		    ZPOOL_CONFIG_DRAIDCFG_BASE);
 #endif
 		return (B_FALSE);
 	}
@@ -723,16 +756,20 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 		return (B_FALSE);
 	}
 
-	if (nvlist_lookup_uint8_array(config, ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c) != 0) {
+	if (nvlist_lookup_uint8_array(config,
+	    ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c) != 0) {
 #ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n", ZPOOL_CONFIG_DRAIDCFG_PERM);
+		fprintf(stderr, "Missing %s in configuration\n",
+		    ZPOOL_CONFIG_DRAIDCFG_PERM);
 #endif
 		return (B_FALSE);
 	}
 
 	if (c != b * n) {
 #ifndef _KERNEL
-		fprintf(stderr, "Permutation array has %u items, but %lu expected\n", c, b * n);
+		fprintf(stderr,
+		    "Permutation array has %u items, but %lu expected\n",
+		    c, b * n);
 #endif
 		return (B_FALSE);
 	}
@@ -744,7 +781,9 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 
 			if (val >= n) {
 #ifndef _KERNEL
-				fprintf(stderr, "Invalid value %lu in permutation %d\n", val, i);
+				fprintf(stderr,
+				    "Invalid value %lu in permutation %d\n",
+				    val, i);
 #endif
 				return (B_FALSE);
 			}
@@ -752,7 +791,10 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 			for (k = 0; k < j; k++) {
 				if (val == perm[i * n + k]) {
 #ifndef _KERNEL
-					fprintf(stderr, "Duplicated value %lu in permutation %d\n", val, i);
+					fprintf(stderr,
+					    "Duplicated value %lu in "
+					    "permutation %d\n",
+					    val, i);
 #endif
 					return (B_FALSE);
 				}
@@ -779,11 +821,14 @@ vdev_draid_config_add(nvlist_t *top, nvlist_t *draidcfg)
 		return (B_FALSE);
 
 	parity = fnvlist_lookup_uint64(top, ZPOOL_CONFIG_NPARITY);
-	if (parity != fnvlist_lookup_uint64(draidcfg, ZPOOL_CONFIG_DRAIDCFG_PARITY))
+	if (parity != fnvlist_lookup_uint64(draidcfg,
+	    ZPOOL_CONFIG_DRAIDCFG_PARITY))
 		return (B_FALSE);
 
-	VERIFY0(nvlist_lookup_nvlist_array(top, ZPOOL_CONFIG_CHILDREN, &children, &c));
-	if (c != fnvlist_lookup_uint64(draidcfg, ZPOOL_CONFIG_DRAIDCFG_CHILDREN))
+	VERIFY0(nvlist_lookup_nvlist_array(top,
+	    ZPOOL_CONFIG_CHILDREN, &children, &c));
+	if (c !=
+	    fnvlist_lookup_uint64(draidcfg, ZPOOL_CONFIG_DRAIDCFG_CHILDREN))
 		return (B_FALSE);
 
 	/* HH: todo: check permutation array csum */
@@ -794,10 +839,12 @@ vdev_draid_config_add(nvlist_t *top, nvlist_t *draidcfg)
 static struct vdev_draid_configuration *
 vdev_draid_config_create(vdev_t *vd)
 {
-/* HH: should probably allocate draid_zero_page page aligned, when need to deal with
- * ashift larger than a page */
+/*
+ * HH: should probably allocate draid_zero_page page aligned, when need to deal
+ * with ashift larger than a page
+ */
 #ifdef _KERNEL
-# define draid_zero_page empty_zero_page
+#define	draid_zero_page empty_zero_page
 #else
 static char draid_zero_page[PAGE_SIZE];
 #endif
@@ -815,16 +862,20 @@ static char draid_zero_page[PAGE_SIZE];
 	if (!vdev_draid_config_validate(vd, nvl))
 		return (NULL);
 
-	cfg = kmem_alloc(sizeof(*cfg), KM_SLEEP);
-	cfg->dcf_children = fnvlist_lookup_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_CHILDREN);
+	cfg = kmem_alloc(sizeof (*cfg), KM_SLEEP);
+	cfg->dcf_children = fnvlist_lookup_uint64(nvl,
+	    ZPOOL_CONFIG_DRAIDCFG_CHILDREN);
 	cfg->dcf_data = fnvlist_lookup_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_DATA);
-	cfg->dcf_parity = fnvlist_lookup_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_PARITY);
-	cfg->dcf_spare = fnvlist_lookup_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_SPARE);
+	cfg->dcf_parity = fnvlist_lookup_uint64(nvl,
+	    ZPOOL_CONFIG_DRAIDCFG_PARITY);
+	cfg->dcf_spare = fnvlist_lookup_uint64(nvl,
+	    ZPOOL_CONFIG_DRAIDCFG_SPARE);
 	cfg->dcf_bases = fnvlist_lookup_uint64(nvl, ZPOOL_CONFIG_DRAIDCFG_BASE);
 
-	VERIFY0(nvlist_lookup_uint8_array(nvl, ZPOOL_CONFIG_DRAIDCFG_PERM, &perms, &c));
+	VERIFY0(nvlist_lookup_uint8_array(nvl,
+	    ZPOOL_CONFIG_DRAIDCFG_PERM, &perms, &c));
 
-	base_perms = kmem_alloc(sizeof(uint64_t) * c, KM_SLEEP);
+	base_perms = kmem_alloc(sizeof (uint64_t) * c, KM_SLEEP);
 	for (i = 0, children = cfg->dcf_children; i < cfg->dcf_bases; i++)
 		for (j = 0; j < children; j++)
 			base_perms[i * children + j] = perms[i * children + j];
@@ -907,8 +958,9 @@ vdev_draid_close(vdev_t *vd)
 		return;
 
 	abd_put(cfg->dcf_zero_abd);
-	kmem_free((void *)cfg->dcf_base_perms, sizeof(uint64_t) * cfg->dcf_bases * cfg->dcf_children);
-	kmem_free(cfg, sizeof(*cfg));
+	kmem_free((void *)cfg->dcf_base_perms,
+	    sizeof (uint64_t) * cfg->dcf_bases * cfg->dcf_children);
+	kmem_free(cfg, sizeof (*cfg));
 	vd->vdev_tsd = NULL;
 }
 
@@ -938,10 +990,12 @@ vdev_draid_asize(vdev_t *vd, uint64_t psize)
 boolean_t
 vdev_draid_need_resilver(vdev_t *vd, uint64_t offset, size_t psize)
 {
-	boolean_t mirror = vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift);
+	boolean_t mirror =
+	    vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift);
 
 	/* A block cannot cross redundancy group boundary */
-	ASSERT3U(offset, ==, vdev_draid_check_block(vd, offset, vdev_draid_asize(vd, psize)));
+	ASSERT3U(offset, ==,
+	    vdev_draid_check_block(vd, offset, vdev_draid_asize(vd, psize)));
 
 	return (vdev_draid_group_degraded(vd, NULL, offset, psize, mirror));
 }
@@ -976,12 +1030,13 @@ vdev_draid_io_start(zio_t *zio)
 
 	vdev_draid_assert_vd(vd);
 
-	if (vdev_draid_ms_mirrored(vd, zio->io_offset >> vd->vdev_ms_shift)) { /* hybrid mirror */
-		(void)vdev_draid_mirror_map_alloc(zio, ashift, cfg, NULL);
+	if (vdev_draid_ms_mirrored(vd, zio->io_offset >> vd->vdev_ms_shift)) {
+		(void) vdev_draid_mirror_map_alloc(zio, ashift, cfg, NULL);
 
 		ASSERT(zio->io_vsd != NULL);
 		ASSERT(zio->io_size <= (1ULL << ashift) ||
-		       ((zio->io_flags & ZIO_FLAG_RESILVER) && zio->io_spa->spa_dsl_pool->dp_scan->scn_is_sequential));
+		    ((zio->io_flags & ZIO_FLAG_RESILVER) &&
+		    zio->io_spa->spa_dsl_pool->dp_scan->scn_is_sequential));
 		vdev_mirror_ops.vdev_op_io_start(zio);
 		return;
 	}
@@ -997,12 +1052,12 @@ vdev_draid_io_start(zio_t *zio)
 			rc = &rm->rm_col[c];
 			cvd = vd->vdev_child[rc->rc_devidx];
 			zio_nowait(zio_vdev_child_io(zio, NULL, cvd,
-						     rc->rc_offset, rc->rc_abd, rc->rc_size,
-						     zio->io_type, zio->io_priority, 0,
-						     vdev_raidz_child_done, rc));
+			    rc->rc_offset, rc->rc_abd, rc->rc_size,
+			    zio->io_type, zio->io_priority, 0,
+			    vdev_raidz_child_done, rc));
 		}
 
-		/* 
+		/*
 		 * Unlike raidz, it's mandatory to fill skip sectors with zero.
 		 */
 		for (c = rm->rm_skipstart, i = 0; i < rm->rm_nskip; c++, i++) {
@@ -1022,12 +1077,16 @@ vdev_draid_io_start(zio_t *zio)
 	}
 
 	ASSERT(zio->io_type == ZIO_TYPE_READ);
-	/* HH: sequential resilver must do IO at redundancy group boundary, i.e.
-	 * rm->rm_nskip must be 0 */
-	ASSERT((zio->io_flags & ZIO_FLAG_RESILVER) == 0 || !zio->io_spa->spa_dsl_pool->dp_scan->scn_is_sequential || rm->rm_nskip == 0);
+	/*
+	 * HH: sequential resilver must do IO at redundancy group boundary, i.e.
+	 * rm->rm_nskip must be 0
+	 */
+	ASSERT((zio->io_flags & ZIO_FLAG_RESILVER) == 0 ||
+	    !zio->io_spa->spa_dsl_pool->dp_scan->scn_is_sequential ||
+	    rm->rm_nskip == 0);
 
 	/*
-	 * Iterate over the columns in reverse order so that we hit the parity 
+	 * Iterate over the columns in reverse order so that we hit the parity
 	 * last -- any errors along the way will force us to read the parity.
 	 */
 	for (c = rm->rm_cols - 1; c >= 0; c--) {
@@ -1053,16 +1112,18 @@ vdev_draid_io_start(zio_t *zio)
 			continue;
 		}
 		if (c >= rm->rm_firstdatacol || rm->rm_missingdata > 0 ||
-	    	    (zio->io_flags & (ZIO_FLAG_SCRUB | ZIO_FLAG_RESILVER))) {
+		    (zio->io_flags & (ZIO_FLAG_SCRUB | ZIO_FLAG_RESILVER))) {
 			zio_nowait(zio_vdev_child_io(zio, NULL, cvd,
-		    		   rc->rc_offset, rc->rc_abd, rc->rc_size,
-				   zio->io_type, zio->io_priority, 0,
-				   vdev_raidz_child_done, rc));
+			    rc->rc_offset, rc->rc_abd, rc->rc_size,
+			    zio->io_type, zio->io_priority, 0,
+			    vdev_raidz_child_done, rc));
 		}
 	}
 
-	/* Check skip sectors for scrub/resilver. For sequential rebuild,
-	 * this is a no-op because rm->rm_nskip is always zero. */
+	/*
+	 * Check skip sectors for scrub/resilver. For sequential rebuild,
+	 * this is a no-op because rm->rm_nskip is always zero.
+	 */
 	if ((zio->io_flags & (ZIO_FLAG_SCRUB | ZIO_FLAG_RESILVER))) {
 		for (c = rm->rm_skipstart, i = 0; i < rm->rm_nskip; c++, i++) {
 			abd_t *abd;
@@ -1073,17 +1134,19 @@ vdev_draid_io_start(zio_t *zio)
 			rc = &rm->rm_col[c];
 			cvd = vd->vdev_child[rc->rc_devidx];
 
-			if (!vdev_draid_readable(cvd, rc->rc_offset + rc->rc_size)) {
+			if (!vdev_draid_readable(cvd,
+			    rc->rc_offset + rc->rc_size)) {
 				rc->rc_abd_skip = NULL;
 				continue;
 			}
 
 			abd = abd_get_offset(rm->rm_abd_skip, i << ashift);
-			*((int *) abd_to_buf(abd)) = 1;
+			*((int *)abd_to_buf(abd)) = 1;
 			rc->rc_abd_skip = abd;
 
-			/* Skip sector will be written in vdev_draid_io_done() */
-			if (vdev_draid_missing(cvd, rc->rc_offset + rc->rc_size, zio->io_txg, 1))
+			/* Skip sector to be written in vdev_draid_io_done() */
+			if (vdev_draid_missing(cvd,
+			    rc->rc_offset + rc->rc_size, zio->io_txg, 1))
 				continue;
 
 			zio_nowait(zio_vdev_child_io(zio, NULL, cvd,
@@ -1202,7 +1265,7 @@ vdev_draid_io_done(zio_t *zio)
 	if (vdev_draid_ms_mirrored(vd, zio->io_offset >> vd->vdev_ms_shift))
 		vdev_mirror_ops.vdev_op_io_done(zio); /* hybrid mirror */
 	else
-		vdev_raidz_ops.vdev_op_io_done(zio); /* declustered raidz*/
+		vdev_raidz_ops.vdev_op_io_done(zio); /* declustered raidz */
 }
 
 static void
@@ -1246,18 +1309,21 @@ vdev_dspare_get_child(vdev_t *vd, uint64_t offset)
 	struct vdev_draid_configuration *cfg;
 
 	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_spare_ops);
-	ASSERT3U(offset, <, vd->vdev_psize - VDEV_LABEL_START_SIZE - VDEV_LABEL_END_SIZE);
+	ASSERT3U(offset, <,
+	    vd->vdev_psize - VDEV_LABEL_START_SIZE - VDEV_LABEL_END_SIZE);
 	ASSERT(dspare != NULL);
 	draid = dspare->dsp_draid;
 	vdev_draid_assert_vd(draid);
 	cfg = draid->vdev_tsd;
 	ASSERT3U(dspare->dsp_id, <, cfg->dcf_spare);
 
-	permutation = kmem_alloc(sizeof(permutation[0]) * draid->vdev_children, KM_SLEEP);
-	VERIFY0(vdev_draid_get_permutation(permutation, offset >> DRAID_SLICESHIFT, cfg));
+	permutation = kmem_alloc(sizeof (permutation[0]) * draid->vdev_children,
+	    KM_SLEEP);
+	VERIFY0(vdev_draid_get_permutation(permutation,
+	    offset >> DRAID_SLICESHIFT, cfg));
 	spareidx = permutation[draid->vdev_children - 1 - dspare->dsp_id];
 	ASSERT3U(spareidx, <, draid->vdev_children);
-	kmem_free(permutation, sizeof(permutation[0]) * draid->vdev_children);
+	kmem_free(permutation, sizeof (permutation[0]) * draid->vdev_children);
 
 	return (draid->vdev_child[spareidx]);
 }
@@ -1294,9 +1360,11 @@ vdev_draid_spare_read_config(vdev_t *vd)
 	fnvlist_add_uint64(nv, ZPOOL_CONFIG_TOP_GUID, vd->vdev_top->vdev_guid);
 
 	if (vd->vdev_isspare)
-		fnvlist_add_uint64(nv, ZPOOL_CONFIG_POOL_STATE, POOL_STATE_ACTIVE);
+		fnvlist_add_uint64(nv,
+		    ZPOOL_CONFIG_POOL_STATE, POOL_STATE_ACTIVE);
 	else
-		fnvlist_add_uint64(nv, ZPOOL_CONFIG_POOL_STATE, POOL_STATE_SPARE);
+		fnvlist_add_uint64(nv,
+		    ZPOOL_CONFIG_POOL_STATE, POOL_STATE_SPARE);
 
 	for (i = 0, guid = vd->vdev_guid; i < sav->sav_count; i++) {
 		if (sav->sav_vdevs[i]->vdev_ops == &vdev_draid_spare_ops &&
@@ -1330,7 +1398,8 @@ vdev_dspare_open(vdev_t *vd, uint64_t *psize, uint64_t *max_psize,
 	}
 
 	if (sscanf(vd->vdev_path, VDEV_DRAID_SPARE_PATH_FMT,
-		   (long unsigned*)&nparity, (long unsigned*)&draid_id, (long unsigned*)&spare_id) != 3)
+	    (long unsigned *)&nparity, (long unsigned *)&draid_id,
+	    (long unsigned *)&spare_id) != 3)
 		return (SET_ERROR(EINVAL));
 
 	if (draid_id >= vd->vdev_spa->spa_root_vdev->vdev_children)
@@ -1347,7 +1416,7 @@ vdev_dspare_open(vdev_t *vd, uint64_t *psize, uint64_t *max_psize,
 	if (spare_id >= cfg->dcf_spare)
 		return (SET_ERROR(EINVAL));
 
-	dspare = kmem_alloc(sizeof(*dspare), KM_SLEEP);
+	dspare = kmem_alloc(sizeof (*dspare), KM_SLEEP);
 	dspare->dsp_draid = draid;
 	dspare->dsp_id = spare_id;
 	vd->vdev_tsd = dspare;
@@ -1356,7 +1425,8 @@ skip_open:
 	vdev_draid_assert_vd(draid);
 
 	asize = draid->vdev_asize / (draid->vdev_children - cfg->dcf_spare);
-	max_asize = draid->vdev_max_asize / (draid->vdev_children - cfg->dcf_spare);
+	max_asize = draid->vdev_max_asize /
+	    (draid->vdev_children - cfg->dcf_spare);
 
 	*ashift = draid->vdev_ashift;
 	*psize = asize + (VDEV_LABEL_START_SIZE + VDEV_LABEL_END_SIZE);
@@ -1373,8 +1443,7 @@ vdev_dspare_close(vdev_t *vd)
 		return;
 
 	vd->vdev_tsd = NULL;
-	kmem_free(dspare, sizeof(*dspare));
-	return;
+	kmem_free(dspare, sizeof (*dspare));
 }
 
 static uint64_t
@@ -1407,7 +1476,8 @@ vdev_dspare_io_start(zio_t *zio)
 		return;
 	}
 
-	/* HH: at pool creation, dspare gets some writes with
+	/*
+	 * HH: at pool creation, dspare gets some writes with
 	 * ZIO_FLAG_SPECULATIVE and ZIO_FLAG_NODATA.
 	 * Need to understand and handle them right.
 	 */
@@ -1421,8 +1491,10 @@ vdev_dspare_io_start(zio_t *zio)
 	    offset >= vd->vdev_psize - VDEV_LABEL_END_SIZE) {
 		ASSERT(zio->io_flags & ZIO_FLAG_PHYSICAL);
 
-		/* HH: dspare should not get any label IO as it is pretending to be a leaf disk.
-		 * Later should catch and fix all places that still does label IO to dspare.
+		/*
+		 * HH: dspare should not get any label IO as it is pretending
+		 * to be a leaf disk. Later should catch and fix all places
+		 * that still does label IO to dspare.
 		 */
 		zio->io_error = SET_ERROR(ENODATA);
 		zio_interrupt(zio);
@@ -1447,18 +1519,17 @@ vdev_dspare_io_start(zio_t *zio)
 	}
 
 	/* dspare IO does not cross slice boundary */
-	ASSERT3U(offset >> DRAID_SLICESHIFT, ==, (offset + zio->io_size - 1) >> DRAID_SLICESHIFT);
+	ASSERT3U(offset >> DRAID_SLICESHIFT, ==,
+	    (offset + zio->io_size - 1) >> DRAID_SLICESHIFT);
 	zio_nowait(zio_vdev_child_io(zio, NULL, cvd, offset, zio->io_abd,
-		       zio->io_size, zio->io_type, zio->io_priority, 0,
-		       vdev_dspare_child_done, zio));
+	    zio->io_size, zio->io_type, zio->io_priority, 0,
+	    vdev_dspare_child_done, zio));
 	zio_execute(zio);
-	return;
 }
 
 static void
 vdev_dspare_io_done(zio_t *zio)
 {
-	return;
 }
 
 vdev_ops_t vdev_draid_spare_ops = {
