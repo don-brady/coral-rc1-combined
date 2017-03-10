@@ -43,8 +43,11 @@
 
 #include "vdev_raidz.h"
 
-
 int draid_debug_lvl = 1;
+
+static boolean_t vdev_draid_io_mirrored(const vdev_t *vd, zio_t *zio);
+static uint64_t vdev_draid_asize_by_type(const vdev_t *vd, uint64_t psize,
+    boolean_t mirror);
 
 void
 vdev_draid_debug_zio(zio_t *zio, boolean_t mirror)
@@ -137,8 +140,7 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift,
 	uint64_t *permutation;
 	ASSERTV(vdev_t *vd = zio->io_vd);
 
-	ASSERT(!vdev_draid_ms_mirrored(vd,
-	    zio->io_offset >> vd->vdev_ms_shift));
+	ASSERT(!vdev_draid_io_mirrored(vd, zio));
 	ASSERT3U(ncols % (nparity + ndata), ==, nspare);
 	ASSERT0(b % (nparity + ndata));
 	ASSERT0(P2PHASE(DRAID_SLICESIZE, 1ULL << unit_shift));
@@ -283,7 +285,7 @@ vdev_draid_mirror_map_alloc(zio_t *zio, uint64_t unit_shift,
 	uint64_t *permutation;
 	ASSERTV(const uint64_t psize = zio->io_size >> unit_shift);
 
-	ASSERT(vdev_draid_ms_mirrored(vd, zio->io_offset >> vd->vdev_ms_shift));
+	ASSERT(vdev_draid_io_mirrored(vd, zio));
 	ASSERT3U(ncols % (nparity + cfg->dcf_data), ==, nspare);
 	ASSERT0(P2PHASE(DRAID_SLICESIZE, 1ULL << unit_shift));
 
@@ -418,14 +420,18 @@ vdev_draid_is_remainder_group(const vdev_t *vd,
 }
 
 uint64_t
-vdev_draid_get_astart(const vdev_t *vd, const uint64_t start)
+vdev_draid_get_astart(const vdev_t *vd, const uint64_t start, boolean_t mirror)
 {
 	uint64_t astart, perm_off, copies;
-	boolean_t mirror =
-	    vdev_draid_ms_mirrored(vd, start >> vd->vdev_ms_shift);
 	uint64_t group = vdev_draid_offset2group(vd, start, mirror);
 	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 
+#ifdef ZFS_DEBUG__
+	if (vdev_metaslab_group_by_id(vd, start >> vd->vdev_ms_shift) == NULL)
+		cmn_err(CE_WARN, "vdev_draid_get_astart: ms-%d, %s, bias %d",
+		    start >> vd->vdev_ms_shift, mirror ? "Mirror" : "dRAID",
+		    vd->vdev_alloc_bias);
+#endif
 	vdev_draid_assert_vd(vd);
 
 	if (vdev_draid_is_remainder_group(vd, group, mirror))
@@ -459,7 +465,8 @@ vdev_draid_check_block(const vdev_t *vd, uint64_t start, uint64_t size)
 	 */
 	if (group == vdev_draid_offset2group(vd, end, mirror) &&
 	    !vdev_draid_is_remainder_group(vd, group, mirror)) {
-		ASSERT3U(start, ==, vdev_draid_get_astart(vd, start));
+		ASSERT3U(start, ==, vdev_draid_get_astart(vd, start, mirror));
+
 		return (start);
 	}
 
@@ -467,19 +474,69 @@ vdev_draid_check_block(const vdev_t *vd, uint64_t start, uint64_t size)
 	if (vdev_draid_is_remainder_group(vd, group, mirror))
 		group++;
 	ASSERT(!vdev_draid_is_remainder_group(vd, group, mirror));
+
 	return (vdev_draid_group2offset(vd, group, mirror));
 }
 
 boolean_t
 vdev_draid_ms_mirrored(const vdev_t *vd, uint64_t ms_id)
 {
-	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_ops);
+	metaslab_group_t *mgp = vdev_metaslab_group_by_id(vd, ms_id);
 
-	/* HH: dedicate 1/20 ms for hybrid mirror */
-	if ((ms_id % 20) == 19)
+	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_ops);
+	/* we should not get here with a vdev that is not ready */
+	ASSERT(mgp != NULL);
+
+	if (vd->vdev_spa->spa_segregate_metadata && (mgp == vd->vdev_custom_mg))
 		return (B_TRUE);
-	else
-		return (B_FALSE);
+
+	return (B_FALSE);
+}
+
+static boolean_t
+vdev_draid_io_mirrored(const vdev_t *vd, zio_t *zio)
+{
+	uint64_t ms_id = zio->io_offset >> vd->vdev_ms_shift;
+
+	/*
+	 * when the vdev is not fully initialize use blkptr to determine type
+	 */
+	if (vdev_metaslab_group_by_id(vd, ms_id) == NULL) {
+		const blkptr_t *bp = zio->io_bp;
+		uint64_t asize = 0, psize;
+		uint64_t asize_m, asize_d;
+		uint_t d;
+
+		ASSERT(bp != NULL);
+		ASSERT0(BP_IS_EMBEDDED(bp));
+
+		psize = zio->io_size;
+		asize_m = vdev_draid_asize_by_type(vd, psize, B_TRUE);
+		asize_d = vdev_draid_asize_by_type(vd, psize, B_FALSE);
+		/* TBD - need solution for the case where asize_m == asize_d */
+
+		/* match with a DVA that belongs to this vdev */
+		for (d = 0; d < BP_GET_NDVAS(bp); d++) {
+			if (DVA_GET_VDEV(&bp->blk_dva[d]) != vd->vdev_id)
+				continue;
+
+			asize = DVA_GET_ASIZE(&bp->blk_dva[d]);
+#ifdef ZFS_DEBUG__
+			cmn_err(CE_WARN, "vdev_draid_io_mirrored: ms-%d dva%d "
+			    "psize %llu asize %llu use %s [%llu, %llu]",
+			    (int)ms_id, (int)d, psize, asize, asize == asize_m ?
+			    "Mirror" : "dRAID", asize_m, asize_d);
+#endif
+			if (asize == asize_m)
+				return (B_TRUE);
+			if (asize == asize_d)
+				return (B_FALSE);
+		}
+		cmn_err(CE_PANIC, "not a draid block %llu/%llu %llu %llu",
+		    psize, asize, asize_m, asize_d);
+	}
+
+	return (vdev_draid_ms_mirrored(vd, ms_id));
 }
 
 static vdev_t *vdev_dspare_get_child(vdev_t *vd, uint64_t offset);
@@ -965,7 +1022,7 @@ vdev_draid_close(vdev_t *vd)
 }
 
 static uint64_t
-vdev_draid_asize(vdev_t *vd, uint64_t psize)
+vdev_draid_asize_by_type(const vdev_t *vd, uint64_t psize, boolean_t mirror)
 {
 	uint64_t asize;
 	uint64_t ashift = vd->vdev_top->vdev_ashift;
@@ -976,15 +1033,36 @@ vdev_draid_asize(vdev_t *vd, uint64_t psize)
 
 	asize = ((psize - 1) >> ashift) + 1;
 
-	if (asize == 1) { /* mirror */
-		asize += nparity;
+	if (mirror) {
+		asize *= 1 + nparity;
 	} else { /* draid */
+		ASSERT3U(cfg->dcf_data, !=, 0);
 		asize = roundup(asize, cfg->dcf_data);
 		asize += nparity * (asize / cfg->dcf_data);
 		ASSERT0(asize % (nparity + cfg->dcf_data));
 	}
 
+	ASSERT3U(asize, !=, 0);
 	return (asize << ashift);
+}
+
+static uint64_t
+vdev_draid_asize(vdev_t *vd, uint64_t psize, uint64_t offset)
+{
+	uint64_t ms_id = offset >> vd->vdev_ms_shift;
+	boolean_t mirror;
+
+	/*
+	 * Note - when the vdev isn't ready to take allocations, we know that
+	 * an early call for the asize is from vdev_metaslab_init to determine
+	 * the vdev_deflate_ratio.  So we can just compute asize for dRAID.
+	 */
+	if (vdev_metaslab_group_by_id(vd, ms_id) == NULL)
+		mirror = B_FALSE;
+	else
+		mirror = vdev_draid_ms_mirrored(vd, ms_id);
+
+	return (vdev_draid_asize_by_type(vd, psize, mirror));
 }
 
 boolean_t
@@ -995,7 +1073,8 @@ vdev_draid_need_resilver(vdev_t *vd, uint64_t offset, size_t psize)
 
 	/* A block cannot cross redundancy group boundary */
 	ASSERT3U(offset, ==,
-	    vdev_draid_check_block(vd, offset, vdev_draid_asize(vd, psize)));
+	    vdev_draid_check_block(vd, offset,
+	    vdev_draid_asize(vd, psize, offset)));
 
 	return (vdev_draid_group_degraded(vd, NULL, offset, psize, mirror));
 }
@@ -1030,7 +1109,7 @@ vdev_draid_io_start(zio_t *zio)
 
 	vdev_draid_assert_vd(vd);
 
-	if (vdev_draid_ms_mirrored(vd, zio->io_offset >> vd->vdev_ms_shift)) {
+	if (vdev_draid_io_mirrored(vd, zio)) {
 		(void) vdev_draid_mirror_map_alloc(zio, ashift, cfg, NULL);
 
 		ASSERT(zio->io_vsd != NULL);
@@ -1043,7 +1122,8 @@ vdev_draid_io_start(zio_t *zio)
 
 	rm = vdev_draid_map_alloc(zio, ashift, cfg, NULL);
 
-	ASSERT3U(rm->rm_asize, ==, vdev_psize_to_asize(vd, zio->io_size));
+	ASSERT3U(rm->rm_asize, ==, vdev_psize_to_asize(vd, zio->io_size,
+	    zio->io_offset));
 
 	if (zio->io_type == ZIO_TYPE_WRITE) {
 		vdev_raidz_generate_parity(rm);
@@ -1262,7 +1342,7 @@ vdev_draid_io_done(zio_t *zio)
 {
 	vdev_t *vd = zio->io_vd;
 
-	if (vdev_draid_ms_mirrored(vd, zio->io_offset >> vd->vdev_ms_shift))
+	if (vdev_draid_io_mirrored(vd, zio))
 		vdev_mirror_ops.vdev_op_io_done(zio); /* hybrid mirror */
 	else
 		vdev_raidz_ops.vdev_op_io_done(zio); /* declustered raidz */
@@ -1447,7 +1527,7 @@ vdev_dspare_close(vdev_t *vd)
 }
 
 static uint64_t
-vdev_dspare_asize(vdev_t *vd, uint64_t psize)
+vdev_dspare_asize(vdev_t *vd, uint64_t psize, uint64_t offset)
 {
 	/* HH: this function should never get called */
 	ASSERT0(psize);

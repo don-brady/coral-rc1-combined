@@ -789,7 +789,8 @@ zfs_blkptr_verify(spa_t *spa, const blkptr_t *bp)
 		offset = DVA_GET_OFFSET(&bp->blk_dva[i]);
 		asize = DVA_GET_ASIZE(&bp->blk_dva[i]);
 		if (BP_IS_GANG(bp))
-			asize = vdev_psize_to_asize(vd, SPA_GANGBLOCKSIZE);
+			asize = vdev_psize_to_asize(vd, SPA_GANGBLOCKSIZE,
+			    offset);
 		if (offset + asize > vd->vdev_asize) {
 			zfs_panic_recover("blkptr at %p DVA %u has invalid "
 			    "OFFSET %llu",

@@ -1671,7 +1671,7 @@ vdev_raidz_close(vdev_t *vd)
 }
 
 static uint64_t
-vdev_raidz_asize(vdev_t *vd, uint64_t psize)
+vdev_raidz_asize(vdev_t *vd, uint64_t psize, uint64_t offset)
 {
 	uint64_t asize;
 	uint64_t ashift = vd->vdev_top->vdev_ashift;
@@ -1757,7 +1757,8 @@ vdev_raidz_io_start(zio_t *zio)
 	rm = vdev_raidz_map_alloc(zio, tvd->vdev_ashift, vd->vdev_children,
 	    vd->vdev_nparity);
 
-	ASSERT3U(rm->rm_asize, ==, vdev_psize_to_asize(vd, zio->io_size));
+	ASSERT3U(rm->rm_asize, ==, vdev_psize_to_asize(vd, zio->io_size,
+	    zio->io_offset));
 
 	if (zio->io_type == ZIO_TYPE_WRITE) {
 		vdev_raidz_generate_parity(rm);

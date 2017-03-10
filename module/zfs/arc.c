@@ -7409,7 +7409,7 @@ l2arc_write_buffers(spa_t *spa, l2arc_dev_t *dev, uint64_t target_sz)
 			/*
 			 * Keep the clock hand suitably device-aligned.
 			 */
-			asize = vdev_psize_to_asize(dev->l2ad_vdev, size);
+			asize = vdev_psize_to_asize(dev->l2ad_vdev, size, 0);
 			write_psize += asize;
 			dev->l2ad_hand += asize;
 

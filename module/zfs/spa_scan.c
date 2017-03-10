@@ -125,7 +125,7 @@ spa_scan_rebuild(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t length)
 	    vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift))
 		max_asize = SPA_MAXBLOCKSIZE * (1 + vd->vdev_nparity);
 	else
-		max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE);
+		max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE, offset);
 
 	while (length > 0) {
 		chunksz = MIN(length, max_asize);

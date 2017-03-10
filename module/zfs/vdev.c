@@ -115,18 +115,19 @@ vdev_derive_alloc_bias(const char *bias)
 }
 
 /*
- * Default asize function: return the MAX of psize with the asize of
- * all children.  This is what's used by anything other than RAID-Z.
+ * Default asize function: return the MAX of psize with the asize of all
+ * children.  This is what's used by anything other than RAID-Z or dRAID.
  */
 uint64_t
-vdev_default_asize(vdev_t *vd, uint64_t psize)
+vdev_default_asize(vdev_t *vd, uint64_t psize, uint64_t offset)
 {
 	uint64_t asize = P2ROUNDUP(psize, 1ULL << vd->vdev_top->vdev_ashift);
 	uint64_t csize;
 	int c;
 
 	for (c = 0; c < vd->vdev_children; c++) {
-		csize = vdev_psize_to_asize(vd->vdev_child[c], psize);
+		/* DJB TBD -- do we want largest asize inflate for dRAID ? */
+		csize = vdev_psize_to_asize(vd->vdev_child[c], psize, 0);
 		asize = MAX(asize, csize);
 	}
 
@@ -1099,7 +1100,7 @@ vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 	 * otherwise it would inconsistently account for existing bp's.
 	 */
 	vd->vdev_deflate_ratio = (1 << 17) /
-	    (vdev_psize_to_asize(vd, 1 << 17) >> SPA_MINBLOCKSHIFT);
+	    (vdev_psize_to_asize(vd, 1 << 17, 0) >> SPA_MINBLOCKSHIFT);
 
 	ASSERT(oldc <= newc);
 
@@ -2764,9 +2765,9 @@ vdev_sync(vdev_t *vd, uint64_t txg)
 }
 
 uint64_t
-vdev_psize_to_asize(vdev_t *vd, uint64_t psize)
+vdev_psize_to_asize(vdev_t *vd, uint64_t psize, uint64_t offset)
 {
-	return (vd->vdev_ops->vdev_op_asize(vd, psize));
+	return (vd->vdev_ops->vdev_op_asize(vd, psize, offset));
 }
 
 /*
@@ -3195,6 +3196,18 @@ vdev_get_mg(vdev_t *vd, metaslab_class_t *mc)
 
 	return (mg);
 }
+
+metaslab_group_t *
+vdev_metaslab_group_by_id(const vdev_t *vd, uint64_t ms_id)
+{
+	metaslab_t *msp = NULL;
+
+	if (ms_id < vd->vdev_ms_count)
+		msp = vd->vdev_ms[ms_id];
+
+	return (msp != NULL ? msp->ms_group: NULL);
+}
+
 
 static void
 vdev_get_child_stat(vdev_t *cvd, vdev_stat_t *vs, vdev_stat_t *cvs)

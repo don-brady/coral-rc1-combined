@@ -66,7 +66,7 @@ extern uint32_t zfs_vdev_async_write_max_active;
 typedef int	vdev_open_func_t(vdev_t *vd, uint64_t *size, uint64_t *max_size,
     uint64_t *ashift);
 typedef void	vdev_close_func_t(vdev_t *vd);
-typedef uint64_t vdev_asize_func_t(vdev_t *vd, uint64_t psize);
+typedef uint64_t vdev_asize_func_t(vdev_t *vd, uint64_t psize, uint64_t offset);
 typedef void	vdev_io_start_func_t(zio_t *zio);
 typedef void	vdev_io_done_func_t(zio_t *zio);
 typedef void	vdev_state_change_func_t(vdev_t *vd, int, int);
@@ -408,7 +408,7 @@ extern const zio_vsd_ops_t vdev_mirror_vsd_ops;
 /*
  * Common size functions
  */
-extern uint64_t vdev_default_asize(vdev_t *vd, uint64_t psize);
+extern uint64_t vdev_default_asize(vdev_t *vd, uint64_t psize, uint64_t offset);
 extern uint64_t vdev_get_min_asize(vdev_t *vd);
 extern void vdev_set_min_asize(vdev_t *vd);
 
@@ -425,6 +425,7 @@ extern int zfs_vdev_cache_size;
  * Metaslab specific
  */
 metaslab_group_t *vdev_get_mg(vdev_t *vd, metaslab_class_t *mc);
+metaslab_group_t *vdev_metaslab_group_by_id(const vdev_t *vd, uint64_t ms_id);
 
 extern void vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
     int64_t metadata_space_delta, int64_t smallblks_alloc_delta,
