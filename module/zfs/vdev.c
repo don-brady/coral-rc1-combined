@@ -3120,6 +3120,9 @@ vdev_is_dead(vdev_t *vd)
 boolean_t
 vdev_is_dead_at(vdev_t *vd, uint64_t zio_offset)
 {
+	if (vd->vdev_top->vdev_ops != &vdev_draid_ops)
+		return (vdev_is_dead(vd));
+
 	if (vd->vdev_ops == &vdev_draid_spare_ops)
 		zio_offset -= VDEV_LABEL_START_SIZE;
 

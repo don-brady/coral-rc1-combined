@@ -262,7 +262,11 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift,
 		kmem_free(permutation, sizeof (permutation[0]) * ncols);
 	else
 		*array = permutation; /* caller will free */
-	rm->rm_ops = vdev_raidz_math_get_ops();
+	/*
+	 * HH: rm->rm_ops = vdev_raidz_math_get_ops();
+	 * once dRAID supports all parity implementations
+	 */
+	rm->rm_ops = (void *)&vdev_raidz_original_impl;
 	zio->io_vsd = rm;
 	zio->io_vsd_ops = &vdev_raidz_vsd_ops;
 	return (rm);

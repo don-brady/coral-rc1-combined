@@ -4726,6 +4726,7 @@ spa_vdev_add(spa_t *spa, nvlist_t *nvroot)
 	return (0);
 }
 
+static int spa_rebuild_mirror = 0;
 /*
  * Attach a device to a mirror.  The arguments are the path to any device
  * in the mirror, and the nvroot for the new device.  If the path specifies
@@ -4923,7 +4924,7 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	vdev_dirty(tvd, VDD_DTL, newvd, txg);
 
 	if (spa_scan_enabled(spa) &&
-	    (tvd->vdev_ops == &vdev_mirror_ops ||
+	    ((tvd->vdev_ops == &vdev_mirror_ops && spa_rebuild_mirror != 0) ||
 	    newvd->vdev_ops == &vdev_draid_spare_ops))
 		rebuild = B_TRUE; /* HH: let zpool cmd choose */
 
@@ -7227,6 +7228,10 @@ MODULE_PARM_DESC(spa_load_verify_metadata,
 module_param(spa_load_verify_data, int, 0644);
 MODULE_PARM_DESC(spa_load_verify_data,
 	"Set to traverse data on pool import");
+
+module_param(spa_rebuild_mirror, int, 0644);
+MODULE_PARM_DESC(spa_rebuild_mirror,
+	"Set to enable rebuild on mirror vdev");
 
 /* CSTYLED */
 module_param(zio_taskq_batch_pct, uint, 0444);

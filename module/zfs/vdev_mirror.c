@@ -313,7 +313,23 @@ vdev_mirror_preferred_child_randomize(zio_t *zio)
 static boolean_t
 vdev_mirror_child_readable(mirror_child_t *mc)
 {
-	return (vdev_draid_readable(mc->mc_vd, mc->mc_offset));
+	vdev_t *vd = mc->mc_vd;
+
+	if (vd->vdev_top->vdev_ops == &vdev_draid_ops)
+		return (vdev_draid_readable(vd, mc->mc_offset));
+	else
+		return (vdev_readable(vd));
+}
+
+static boolean_t
+vdev_mirror_child_missing(mirror_child_t *mc, uint64_t txg, uint64_t size)
+{
+	vdev_t *vd = mc->mc_vd;
+
+	if (vd->vdev_top->vdev_ops == &vdev_draid_ops)
+		return (vdev_draid_missing(vd, mc->mc_offset, txg, size));
+	else
+		return (vdev_dtl_contains(vd, DTL_MISSING, txg, size));
 }
 
 /*
@@ -349,7 +365,7 @@ vdev_mirror_child_select(zio_t *zio)
 			continue;
 		}
 
-		if (vdev_draid_missing(mc->mc_vd, mc->mc_offset, txg, 1)) {
+		if (vdev_mirror_child_missing(mc, txg, 1)) {
 			mc->mc_error = SET_ERROR(ESTALE);
 			mc->mc_skipped = 1;
 			mc->mc_speculative = 1;
