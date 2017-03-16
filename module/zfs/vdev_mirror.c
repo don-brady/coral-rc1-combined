@@ -315,7 +315,7 @@ vdev_mirror_child_readable(mirror_child_t *mc)
 {
 	vdev_t *vd = mc->mc_vd;
 
-	if (vd->vdev_top->vdev_ops == &vdev_draid_ops)
+	if (vd->vdev_top != NULL && vd->vdev_top->vdev_ops == &vdev_draid_ops)
 		return (vdev_draid_readable(vd, mc->mc_offset));
 	else
 		return (vdev_readable(vd));
@@ -326,7 +326,7 @@ vdev_mirror_child_missing(mirror_child_t *mc, uint64_t txg, uint64_t size)
 {
 	vdev_t *vd = mc->mc_vd;
 
-	if (vd->vdev_top->vdev_ops == &vdev_draid_ops)
+	if (vd->vdev_top != NULL && vd->vdev_top->vdev_ops == &vdev_draid_ops)
 		return (vdev_draid_missing(vd, mc->mc_offset, txg, size));
 	else
 		return (vdev_dtl_contains(vd, DTL_MISSING, txg, size));
