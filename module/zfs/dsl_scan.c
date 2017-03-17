@@ -361,8 +361,16 @@ dsl_scan_done(dsl_scan_t *scn, boolean_t complete, dmu_tx_t *tx)
 		vdev_dtl_reassess(spa->spa_root_vdev, tx->tx_txg,
 		    complete ? scn->scn_phys.scn_max_txg : 0, B_TRUE);
 		if (complete) {
-			spa_event_notify(spa, NULL, scn->scn_phys.scn_min_txg ?
-			    ESC_ZFS_RESILVER_FINISH : ESC_ZFS_SCRUB_FINISH);
+			const char *name;
+
+			if (DSL_SCAN_IS_REBUILD(scn))
+				name = ESC_ZFS_REBUILD_FINISH;
+			else if (scn->scn_phys.scn_min_txg)
+				name = ESC_ZFS_RESILVER_FINISH;
+			else
+				name = ESC_ZFS_SCRUB_FINISH;
+
+			spa_event_notify(spa, NULL, name);
 		}
 		spa_errlog_rotate(spa);
 

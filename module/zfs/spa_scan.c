@@ -356,6 +356,7 @@ spa_scan_setup_sync(dmu_tx_t *tx)
 	spa_scan_stat_init(spa);
 
 	spa->spa_scrub_started = B_TRUE;
+	spa_event_notify(spa, NULL, ESC_ZFS_REBUILD_START);
 }
 
 int
