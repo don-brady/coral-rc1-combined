@@ -1695,7 +1695,8 @@ vdev_validate(vdev_t *vd, boolean_t strict)
 	 * any further validation.  Otherwise, label I/O will fail and we will
 	 * overwrite the previous state.
 	 */
-	if (vd->vdev_ops->vdev_op_leaf && vdev_readable(vd)) {
+	if (vd->vdev_ops->vdev_op_leaf && vdev_readable(vd) &&
+	    vd->vdev_ops != &vdev_draid_spare_ops) {
 		uint64_t aux_guid = 0;
 		nvlist_t *nvl;
 		uint64_t txg = spa_last_synced_txg(spa) != 0 ?
