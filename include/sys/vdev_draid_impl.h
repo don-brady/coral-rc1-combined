@@ -58,6 +58,7 @@ extern uint64_t vdev_draid_group2offset(const vdev_t *, uint64_t, boolean_t);
 extern boolean_t vdev_draid_is_remainder_group(const vdev_t *,
     uint64_t, boolean_t);
 extern uint64_t vdev_draid_get_groupsz(const vdev_t *, boolean_t);
+extern uint64_t vdev_draid_asize_by_type(const vdev_t *, uint64_t, boolean_t);
 extern boolean_t vdev_draid_config_validate(const vdev_t *, nvlist_t *);
 extern boolean_t vdev_draid_config_add(nvlist_t *, nvlist_t *);
 extern void vdev_draid_fix_skip_sectors(zio_t *);
@@ -73,6 +74,9 @@ extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
 #define	VDEV_DRAID_U8_MAX	((uint8_t)-1)
 
 #define	VDEV_DRAID_SPARE_PATH_FMT "$"VDEV_TYPE_DRAID"%lu-%lu-s%lu"
+
+#define	DVA_GET_DRAID_MIRROR(dva)	BF64_GET((dva)->dva_word[0], 31, 1)
+#define	DVA_SET_DRAID_MIRROR(dva, x)	BF64_SET((dva)->dva_word[0], 31, 1, x)
 
 /* trace_printk is GPL only */
 #define	DRAID_USE_TRACE_PRINTK

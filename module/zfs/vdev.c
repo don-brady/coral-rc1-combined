@@ -1071,6 +1071,27 @@ vdev_metaslab_group_create(vdev_t *vd)
 	}
 }
 
+/*
+ * Compute the raidz/draid deflation ratio.  Note, we hard-code
+ * in 128k (1 << 17) because it is the "typical" blocksize.
+ * Even though SPA_MAXBLOCKSIZE changed, this algorithm can not change,
+ * otherwise it would inconsistently account for existing bp's.
+ */
+static void
+vdev_set_deflate_ratio(vdev_t *vd)
+{
+	const uint64_t psize = 1 << 17;
+	uint64_t asize;
+
+	if (vd->vdev_ops == &vdev_draid_ops) {
+		asize = vdev_draid_asize_by_type(vd, psize, B_FALSE);
+	} else {
+		asize = vdev_psize_to_asize(vd, psize, 0);
+	}
+
+	vd->vdev_deflate_ratio = psize / (asize >> SPA_MINBLOCKSHIFT);
+}
+
 int
 vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 {
@@ -1092,17 +1113,9 @@ vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 		return (0);
 
 	ASSERT(!vd->vdev_ishole);
-
-	/*
-	 * Compute the raidz-deflation ratio.  Note, we hard-code
-	 * in 128k (1 << 17) because it is the "typical" blocksize.
-	 * Even though SPA_MAXBLOCKSIZE changed, this algorithm can not change,
-	 * otherwise it would inconsistently account for existing bp's.
-	 */
-	vd->vdev_deflate_ratio = (1 << 17) /
-	    (vdev_psize_to_asize(vd, 1 << 17, 0) >> SPA_MINBLOCKSHIFT);
-
 	ASSERT(oldc <= newc);
+
+	vdev_set_deflate_ratio(vd);
 
 	mspp = vmem_zalloc(newc * sizeof (*mspp), KM_SLEEP);
 

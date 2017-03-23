@@ -40,7 +40,6 @@ spa_scan_done(zio_t *zio)
 	ASSERT(zio->io_bp != NULL);
 
 	abd_free(zio->io_abd);
-	kmem_free(zio->io_private, sizeof (blkptr_t));
 
 	scn->scn_phys.scn_examined += DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
 	spa->spa_scan_pass_exam += DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
@@ -63,22 +62,24 @@ static int spa_scan_max_rebuild = 4096;
 static void
 spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 {
-	/* HH: maybe bp can be on the stack */
-	blkptr_t *bp = kmem_alloc(sizeof (*bp), KM_SLEEP);
+	blkptr_t blk, *bp = &blk;
 	dva_t *dva = bp->blk_dva;
 	uint64_t psize;
 	spa_t *spa = vd->vdev_spa;
+	boolean_t draid_mirror = B_FALSE;
 	ASSERTV(uint64_t ashift = vd->vdev_top->vdev_ashift);
 
 	ASSERT(vd->vdev_ops == &vdev_draid_ops ||
 	    vd->vdev_ops == &vdev_mirror_ops);
 
+	/* Calculate psize from asize */
 	if (vd->vdev_ops == &vdev_mirror_ops) {
 		psize = asize;
 		ASSERT3U(asize, ==, vdev_psize_to_asize(vd, psize));
 	} else if (vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift)) {
 		ASSERT0((asize >> ashift) % (1 + vd->vdev_nparity));
 		psize = asize / (1 + vd->vdev_nparity);
+		draid_mirror = B_TRUE;
 	} else {
 		struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 
@@ -86,6 +87,7 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 		psize = (asize / (cfg->dcf_data + vd->vdev_nparity)) *
 		    cfg->dcf_data;
 	}
+	ASSERT3U(asize, ==, vdev_psize_to_asize(vd, psize, offset));
 
 	mutex_enter(&spa->spa_scrub_lock);
 	while (spa->spa_scrub_inflight > spa_scan_max_rebuild)
@@ -99,6 +101,8 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 	DVA_SET_OFFSET(&dva[0], offset);
 	DVA_SET_GANG(&dva[0], 0);
 	DVA_SET_ASIZE(&dva[0], asize);
+	if (draid_mirror)
+		DVA_SET_DRAID_MIRROR(&dva[0], 1);
 
 	BP_SET_BIRTH(bp, TXG_INITIAL, TXG_INITIAL);
 	BP_SET_LSIZE(bp, psize);
@@ -111,7 +115,7 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 	BP_SET_BYTEORDER(bp, ZFS_HOST_BYTEORDER);
 
 	zio_nowait(zio_read(pio, spa, bp,
-	    abd_alloc(psize, B_FALSE), psize, spa_scan_done, bp,
+	    abd_alloc(psize, B_FALSE), psize, spa_scan_done, NULL,
 	    ZIO_PRIORITY_SCRUB, ZIO_FLAG_SCAN_THREAD | ZIO_FLAG_RAW |
 	    ZIO_FLAG_CANFAIL | ZIO_FLAG_RESILVER, NULL));
 }
@@ -119,16 +123,11 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 static void
 spa_scan_rebuild(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t length)
 {
-	uint64_t max_asize, chunksz;
-
-	if (vd->vdev_ops == &vdev_draid_ops &&
-	    vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift))
-		max_asize = SPA_MAXBLOCKSIZE * (1 + vd->vdev_nparity);
-	else
-		max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE, offset);
+	uint64_t max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE, offset);
 
 	while (length > 0) {
-		chunksz = MIN(length, max_asize);
+		uint64_t chunksz = MIN(length, max_asize);
+
 		spa_scan_rebuild_block(pio, vd, offset, chunksz);
 
 		length -= chunksz;

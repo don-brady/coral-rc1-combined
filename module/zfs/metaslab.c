@@ -1575,6 +1575,7 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 		uint64_t astart;
 
 		astart = vdev_draid_get_astart(vd, ms->ms_start, mirror);
+		ASSERT3U(astart - ms->ms_start, <, ms->ms_size);
 		ms->ms_size -= astart - ms->ms_start;
 		ms->ms_start = astart;
 
@@ -3576,6 +3577,7 @@ top:
 
 		if (offset != -1ULL) {
 			asize = vdev_psize_to_asize(vd, psize, offset);
+			ASSERT(P2PHASE(asize, 1ULL << vd->vdev_ashift) == 0);
 
 			/*
 			 * If we've just selected this metaslab group,
@@ -3635,6 +3637,11 @@ top:
 			DVA_SET_GANG(&dva[d],
 			    ((flags & METASLAB_GANG_HEADER) ? 1 : 0));
 			DVA_SET_ASIZE(&dva[d], asize);
+			if (vd->vdev_ops == &vdev_draid_ops &&
+			    vdev_draid_ms_mirrored(vd,
+			    offset >> vd->vdev_ms_shift)) {
+				DVA_SET_DRAID_MIRROR(&dva[d], 1);
+			}
 
 			if (flags & METASLAB_FASTWRITE) {
 				atomic_add_64(&vd->vdev_pending_fastwrite,

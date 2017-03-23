@@ -45,6 +45,7 @@
 #include <sys/sa_impl.h>
 #include <sys/vdev.h>
 #include <sys/vdev_impl.h>
+#include <sys/vdev_draid_impl.h>
 #include <sys/metaslab_impl.h>
 #include <sys/dmu_objset.h>
 #include <sys/dsl_dir.h>
@@ -4175,6 +4176,10 @@ zdb_read_block(char *thing, spa_t *spa)
 	DVA_SET_OFFSET(&dva[0], offset);
 	DVA_SET_GANG(&dva[0], !!(flags & ZDB_FLAG_GBH));
 	DVA_SET_ASIZE(&dva[0], vdev_psize_to_asize(vd, psize, offset));
+	if (vd->vdev_ops == &vdev_draid_ops &&
+	    vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift)) {
+		DVA_SET_DRAID_MIRROR(&dva[0], 1);
+	}
 
 	BP_SET_BIRTH(bp, TXG_INITIAL, TXG_INITIAL);
 
