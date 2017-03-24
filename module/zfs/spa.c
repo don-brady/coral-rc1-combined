@@ -5284,6 +5284,7 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 	/* then, loop over each vdev and validate it */
 	for (c = 0; c < children; c++) {
 		uint64_t is_hole = 0;
+		vdev_alloc_bias_t alloc_bias;
 
 		(void) nvlist_lookup_uint64(child[c], ZPOOL_CONFIG_IS_HOLE,
 		    &is_hole);
@@ -5296,6 +5297,17 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 				error = SET_ERROR(EINVAL);
 				break;
 			}
+		}
+
+		/* disallow splitting if allocation classes present */
+		alloc_bias = spa->spa_root_vdev->vdev_child[c]->vdev_alloc_bias;
+		if (alloc_bias == VDEV_BIAS_DEDUP ||
+		    alloc_bias == VDEV_BIAS_METADATA ||
+		    alloc_bias == VDEV_BIAS_SMALLBLKS) {
+			cmn_err(CE_NOTE, "%s pool split with allocation "
+			    "classes not allowed", spa_name(spa));
+			error = SET_ERROR(EINVAL);
+			break;
 		}
 
 		/* which disk is going to be split? */
@@ -5318,9 +5330,6 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 		    vml[c]->vdev_ishole ||
 		    vml[c]->vdev_isspare ||
 		    vml[c]->vdev_isl2cache ||
-		    vml[c]->vdev_alloc_bias == VDEV_BIAS_DEDUP ||
-		    vml[c]->vdev_alloc_bias == VDEV_BIAS_METADATA ||
-		    vml[c]->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS ||
 		    !vdev_writeable(vml[c]) ||
 		    vml[c]->vdev_children != 0 ||
 		    vml[c]->vdev_state != VDEV_STATE_HEALTHY ||
