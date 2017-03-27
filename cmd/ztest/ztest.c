@@ -148,18 +148,11 @@ typedef struct ztest_shared_hdr {
 
 static ztest_shared_hdr_t *ztest_shared_hdr;
 
-/* packed dRAID config for copying between processes */
-typedef struct ztest_draid_config {
-	size_t	size;
-	uint8_t	data[6144];	/* enough for worst case zloop dRAID config */
-} ztest_draid_config_t;
-
 enum ztest_class_state {
 	ZTEST_VDEV_CLASS_OFF,
 	ZTEST_VDEV_CLASS_ON,
 	ZTEST_VDEV_CLASS_RND
 };
-
 
 typedef struct ztest_shared_opts {
 	char zo_pool[ZFS_MAX_DATASET_NAME_LEN];
@@ -177,7 +170,6 @@ typedef struct ztest_shared_opts {
 	int zo_draid_data;
 	int zo_draid_groups;
 	int zo_draid_spares;
-	ztest_draid_config_t zo_draid_config;
 	int zo_datasets;
 	int zo_threads;
 	uint64_t zo_passtime;
@@ -444,7 +436,6 @@ typedef struct ztest_shared {
 	uint64_t	zs_alloc;
 	uint64_t	zs_space;
 	uint64_t	zs_splits;
-	uint64_t	zs_vdevs;
 	uint64_t	zs_mirrors;
 	uint64_t	zs_metaslab_sz;
 	uint64_t	zs_metaslab_df_alloc_threshold;
@@ -1096,9 +1087,7 @@ out:
 static void
 make_draid_config(ztest_shared_opts_t *zo)
 {
-	nvlist_t *draidcfg;
-	char *packed, *path;
-	size_t size;
+	char *path;
 
 	path = umem_alloc(MAXPATHLEN, UMEM_NOFAIL);
 	(void) snprintf(path, MAXPATHLEN, "%s/%s", zo->zo_dir, DRAID_CONFIG);
@@ -1107,17 +1096,6 @@ make_draid_config(ztest_shared_opts_t *zo)
 	ztest_run_draidcfg(ztest_opts.zo_raid_children,
 	    ztest_opts.zo_draid_data, ztest_opts.zo_raid_parity,
 	    ztest_opts.zo_draid_spares, path);
-
-	/* pack it into runtime native encoding */
-	draidcfg = draidcfg_read_file(path);
-	packed = fnvlist_pack(draidcfg, &size);
-	ASSERT3U(size, <=, sizeof (zo->zo_draid_config.data));
-
-	if (ztest_opts.zo_verbose > 4)
-		(void) printf("dRAID packed config size: %d\n", (int)size);
-
-	bcopy(packed, zo->zo_draid_config.data, size);
-	zo->zo_draid_config.size = size;
 
 	umem_free(path, MAXPATHLEN);
 }
@@ -1197,10 +1175,16 @@ make_vdev_raid(char *path, char *aux, char *pool, size_t size,
 	    child, r) == 0);
 
 	if (strcmp(ztest_opts.zo_raid_type, VDEV_TYPE_DRAID) == 0) {
-		nvlist_t *nvl;
-		nvl = fnvlist_unpack((char *)ztest_opts.zo_draid_config.data,
-		    ztest_opts.zo_draid_config.size);
-		VERIFY(vdev_draid_config_add(raid, nvl) == B_TRUE);
+		nvlist_t *draidcfg;
+		char *path;
+
+		path = umem_alloc(MAXPATHLEN, UMEM_NOFAIL);
+		(void) snprintf(path, MAXPATHLEN, "%s/%s", ztest_opts.zo_dir,
+		    DRAID_CONFIG);
+		draidcfg = draidcfg_read_file(path);
+		VERIFY(draidcfg != NULL);
+		VERIFY(vdev_draid_config_add(raid, draidcfg) == B_TRUE);
+		umem_free(path, MAXPATHLEN);
 	}
 
 	for (c = 0; c < r; c++)
@@ -2942,7 +2926,7 @@ ztest_spa_upgrade(ztest_ds_t *zd, uint64_t id)
 	char *name;
 
 	/* skip upgrade testing for dRAID */
-	if (ztest_opts.zo_draid_config.size > 0)
+	if (strcmp(ztest_opts.zo_raid_type, VDEV_TYPE_DRAID) == 0)
 		return;
 
 	mutex_enter(&ztest_vdev_lock);
@@ -3097,7 +3081,7 @@ ztest_vdev_add_remove(ztest_ds_t *zd, uint64_t id)
 
 		if (error && error != EEXIST)
 			fatal(0, "spa_vdev_remove() = %d", error);
-	} else if (zs->zs_vdevs < ztest_opts.zo_vdevs) {
+	} else {
 		spa_config_exit(spa, SCL_VDEV, FTAG);
 
 		/*
@@ -3112,9 +3096,6 @@ ztest_vdev_add_remove(ztest_ds_t *zd, uint64_t id)
 
 		error = spa_vdev_add(spa, nvroot);
 		nvlist_free(nvroot);
-
-		if (error == 0)
-			zs->zs_vdevs++;
 
 		if (error == ENOSPC)
 			ztest_record_enospc("spa_vdev_add");
@@ -3559,10 +3540,10 @@ ztest_vdev_attach_detach(ztest_ds_t *zd, uint64_t id)
 
 	/* XXX workaround 6690467 */
 	if (error != expected_error && expected_error != EBUSY) {
-		fatal(0, "attach (%s %llu, %s %llu, %d) "
+		fatal(0, "vdev_%s (%s %llu, %s %llu) "
 		    "returned %d, expected %d",
-		    oldpath, oldsize, newpath,
-		    newsize, replacing, error, expected_error);
+		    replacing ? "replace" : "attach",
+		    oldpath, oldsize, newpath, newsize, error, expected_error);
 	}
 out:
 	mutex_exit(&ztest_vdev_lock);
@@ -6983,7 +6964,6 @@ ztest_init(ztest_shared_t *zs)
 	ztest_shared->zs_vdev_next_leaf = 0;
 	zs->zs_splits = 0;
 	zs->zs_mirrors = ztest_opts.zo_mirrors;
-	zs->zs_vdevs = 1;
 
 	nvroot = make_vdev_root(NULL, NULL, NULL, ztest_opts.zo_vdev_size, 0,
 	    NULL, ztest_opts.zo_raid_children, zs->zs_mirrors, 1);
