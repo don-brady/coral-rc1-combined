@@ -3538,6 +3538,16 @@ ztest_vdev_attach_detach(ztest_ds_t *zd, uint64_t id)
 	if (error == EOVERFLOW || error == EBUSY)
 		expected_error = error;
 
+	/*
+	 * dRAID doesn't allow distributed spares from a different vdev
+	 * and a spare can be smaller than a slightly expanded vdev
+	 */
+	if (((error == ENOTSUP && expected_error != error) ||
+	    (error == 0 && expected_error == EOVERFLOW)) &&
+	    strstr(newpath, VDEV_TYPE_DRAID) != NULL) {
+		expected_error = error;
+	}
+
 	/* XXX workaround 6690467 */
 	if (error != expected_error && expected_error != EBUSY) {
 		fatal(0, "vdev_%s (%s %llu, %s %llu) "
