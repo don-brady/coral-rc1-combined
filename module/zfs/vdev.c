@@ -3222,7 +3222,7 @@ vdev_metaslab_group_by_id(const vdev_t *vd, uint64_t ms_id)
 	if (ms_id < vd->vdev_ms_count)
 		msp = vd->vdev_ms[ms_id];
 
-	return (msp != NULL ? msp->ms_group: NULL);
+	return (msp != NULL ? msp->ms_group : NULL);
 }
 
 

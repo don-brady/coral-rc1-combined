@@ -88,9 +88,11 @@ extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
 #else
 #define	draid_print(fmt, ...) printk(fmt, ##__VA_ARGS__)
 #endif
-#else
+#define	draid_console(fmt, ...) printk(KERN_EMERG fmt, ##__VA_ARGS__)
+#else /* _KERNEL */
 #define	U64FMT "%lu"
 #define	draid_print(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define	draid_console(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
 #endif
 
 extern int draid_debug_lvl;
@@ -98,7 +100,9 @@ extern void vdev_draid_debug_zio(zio_t *, boolean_t);
 
 #define	draid_dbg(lvl, fmt, ...) \
 	do { \
-		if (draid_debug_lvl >= (lvl)) \
+		if ((lvl) == 0) \
+			draid_console(fmt, ##__VA_ARGS__); \
+		else if (draid_debug_lvl >= (lvl)) \
 			draid_print(fmt, ##__VA_ARGS__); \
 	} while (0);
 

@@ -27,6 +27,7 @@
 #include <sys/spa_impl.h>
 #include <sys/vdev_impl.h>
 #include <sys/vdev_draid_impl.h>
+#include <sys/metaslab_impl.h>
 #include <sys/dsl_scan.h>
 #include <sys/abd.h>
 #include <sys/zio.h>
@@ -431,7 +432,7 @@ vdev_draid_get_astart(const vdev_t *vd, const uint64_t start, boolean_t mirror)
 		draid_dbg(1, "MS-"U64FMT", %s, bias %d\n", ms_id,
 		    mirror ? "Mirror" : "dRAID", vd->vdev_alloc_bias);
 	} else if (mirror != vdev_draid_ms_mirrored(vd, ms_id)) {
-		draid_dbg(1, "Offset "U64FMT" type %s != MS "U64FMT" type\n",
+		draid_dbg(0, "Offset "U64FMT" type %s != MS "U64FMT" type\n",
 		    start, mirror ? "mirror" : "dRAID", ms_id);
 		VERIFY0(1);
 	}
@@ -487,8 +488,21 @@ vdev_draid_ms_mirrored(const vdev_t *vd, uint64_t ms_id)
 	metaslab_group_t *mgp = vdev_metaslab_group_by_id(vd, ms_id);
 
 	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_ops);
-	/* we should not get here with a vdev that is not ready */
-	ASSERT(mgp != NULL);
+
+	/* We should not get here with a vdev that is not ready */
+	if (mgp == NULL) {
+		metaslab_t *msp = NULL;
+
+		if (ms_id < vd->vdev_ms_count)
+			msp = vd->vdev_ms[ms_id];
+
+		draid_dbg(0, "MS "U64FMT" count "U64FMT"\n",
+		    ms_id, vd->vdev_ms_count);
+		draid_dbg(0, "msp %p group %p\n",
+		    msp, msp != NULL ? msp->ms_group : NULL);
+
+		ASSERT(mgp != NULL);
+	}
 
 	if ((spa->spa_segregate_metadata || spa->spa_segregate_smallblks) &&
 	    (mgp == vd->vdev_custom_mg))
@@ -528,7 +542,7 @@ vdev_draid_io_mirrored(zio_t *zio)
 
 		vdev_draid_debug_zio(zio, mirror);
 		snprintf_blkptr(blkbuf, sizeof (blkbuf), bp);
-		draid_dbg(1, "DVA %d type %s different from MS "U64FMT":\n%s\n",
+		draid_dbg(0, "DVA %d type %s different from MS "U64FMT":\n%s\n",
 		    d, mirror ? "mirror" : "dRAID", ms_id, blkbuf);
 		VERIFY0(1);
 	}
@@ -1068,7 +1082,7 @@ vdev_draid_need_resilver(vdev_t *vd, uint64_t offset, size_t psize)
 }
 
 /*
- * Start an IO operation on a RAIDZ VDev
+ * Start an IO operation on a dRAID VDev
  *
  * Outline:
  * - For write operations:
@@ -1110,8 +1124,8 @@ vdev_draid_io_start(zio_t *zio)
 
 	rm = vdev_draid_map_alloc(zio, ashift, cfg, NULL);
 
-	ASSERT3U(rm->rm_asize, ==, vdev_psize_to_asize(vd, zio->io_size,
-	    zio->io_offset));
+	ASSERT3U(rm->rm_asize, ==,
+	    vdev_draid_asize_by_type(vd, zio->io_size, B_FALSE));
 
 	if (zio->io_type == ZIO_TYPE_WRITE) {
 		vdev_raidz_generate_parity(rm);
