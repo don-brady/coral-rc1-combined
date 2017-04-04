@@ -2960,7 +2960,17 @@ static ms_class_stats_t ms_class_stats = {
 };
 
 #define	MS_CLASS_STAT(stat)	(ms_class_stats.stat.value.ui64)
-
+static int
+mscs_update(kstat_t *ksp, int rw)
+{
+	if (rw == KSTAT_WRITE ) {
+		MS_CLASS_STAT(metadata_highest_allocated) = 0;
+		MS_CLASS_STAT(metadata_highest_overage) = 0;
+		MS_CLASS_STAT(smallblks_highest_allocated) = 0;
+		MS_CLASS_STAT(smallblks_highest_overage) = 0;
+	}
+	return 0;
+}
 void
 metaslab_class_stat_init(void)
 {
@@ -2969,6 +2979,7 @@ metaslab_class_stat_init(void)
 	    KSTAT_FLAG_VIRTUAL);
 	if (mscs_ksp != NULL) {
 		mscs_ksp->ks_data = &ms_class_stats;
+		mscs_ksp->ks_update = mscs_update;
 		kstat_install(mscs_ksp);
 	}
 }
