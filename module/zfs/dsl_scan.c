@@ -1358,7 +1358,7 @@ dsl_scan_ddt_entry(dsl_scan_t *scn, enum zio_checksum checksum,
 	zbookmark_phys_t zb = { 0 };
 	int p;
 
-	if (scn->scn_phys.scn_state != DSS_SCANNING)
+	if (scn->scn_phys.scn_state != DSS_SCANNING || DSL_SCAN_IS_REBUILD(scn))
 		return;
 
 	for (p = 0; p < DDT_PHYS_TYPES; p++, ddp++) {
