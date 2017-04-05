@@ -3092,6 +3092,12 @@ zpool_vdev_remove(zpool_handle_t *zhp, const char *path)
 	(void) snprintf(msg, sizeof (msg),
 	    dgettext(TEXT_DOMAIN, "cannot remove %s"), path);
 
+	if (path[0] == VDEV_DRAID_SPARE_PATH_FMT[0]) {
+		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+		    "dRAID spare cannot be removed"));
+		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+	}
+
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	if ((tgt = zpool_find_vdev(zhp, path, &avail_spare, &l2cache,
 	    &islog)) == 0)
