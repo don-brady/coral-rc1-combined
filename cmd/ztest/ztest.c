@@ -3190,7 +3190,7 @@ ztest_vdev_aux_add_remove(ztest_ds_t *zd, uint64_t id)
 	char *aux;
 	char *path;
 	uint64_t guid = 0;
-	int error;
+	int error, ignore_err = 0;
 
 	path = umem_alloc(MAXPATHLEN, UMEM_NOFAIL);
 
@@ -3210,7 +3210,13 @@ ztest_vdev_aux_add_remove(ztest_ds_t *zd, uint64_t id)
 		/*
 		 * Pick a random device to remove.
 		 */
-		guid = sav->sav_vdevs[ztest_random(sav->sav_count)]->vdev_guid;
+		vdev_t *svd = sav->sav_vdevs[ztest_random(sav->sav_count)];
+
+		/* dRAID spares cannot be removed; try anyways to see ENOTSUP */
+		if (strstr(svd->vdev_path, VDEV_TYPE_DRAID) != NULL)
+			ignore_err = ENOTSUP;
+
+		guid = svd->vdev_guid;
 	} else {
 		/*
 		 * Find an unused device we can add.
@@ -3254,7 +3260,7 @@ ztest_vdev_aux_add_remove(ztest_ds_t *zd, uint64_t id)
 			(void) vdev_online(spa, guid, 0, NULL);
 
 		error = spa_vdev_remove(spa, guid, B_FALSE);
-		if (error != 0 && error != EBUSY)
+		if (error != 0 && error != EBUSY && error != ignore_err)
 			fatal(0, "spa_vdev_remove(%llu) = %d", guid, error);
 	}
 
