@@ -202,7 +202,6 @@ boolean_t metaslab_trace_enabled = B_TRUE;
 uint64_t metaslab_trace_max_entries = 5000;
 #endif
 
-static uint64_t metaslab_weight(metaslab_t *);
 static void metaslab_set_fragmentation(metaslab_t *);
 
 #ifdef _METASLAB_TRACING
@@ -1868,6 +1867,30 @@ metaslab_set_fragmentation(metaslab_t *msp)
 }
 
 /*
+ * dRAID metaslabs start at a certain alignment, which causes their sizes to
+ * vary by a few sectors. The block allocator may get confused and pick a
+ * distant metaslab because the closer ones are slightly smaller. The small
+ * variance doesn't matter when the metaslab has already been allocated from.
+ *
+ * This function returns adjusted size to calculate metaslab weight, and
+ * should not be used for other purposes.
+ */
+static uint64_t
+metaslab_weight_size(metaslab_t *msp)
+{
+	vdev_t *vd = msp->ms_group->mg_vd;
+	uint64_t size;
+
+	if (vd->vdev_ops != &vdev_draid_ops ||
+	    space_map_allocated(msp->ms_sm) != 0)
+		return (msp->ms_size);
+
+	size = 1ULL << vd->vdev_ms_shift;
+	ASSERT3U(size, >=, msp->ms_size);
+	return (size);
+}
+
+/*
  * Compute a weight -- a selection preference value -- for the given metaslab.
  * This is based on the amount of free space, the level of fragmentation,
  * the LBA range, and whether the metaslab is loaded.
@@ -1885,7 +1908,7 @@ metaslab_space_weight(metaslab_t *msp)
 	/*
 	 * The baseline weight is the metaslab's free space.
 	 */
-	space = msp->ms_size - space_map_allocated(msp->ms_sm);
+	space = metaslab_weight_size(msp) - space_map_allocated(msp->ms_sm);
 
 	if (metaslab_fragmentation_factor_enabled &&
 	    msp->ms_fragmentation != ZFS_FRAG_INVALID) {
@@ -2023,7 +2046,7 @@ metaslab_segment_weight(metaslab_t *msp)
 	 * The metaslab is completely free.
 	 */
 	if (space_map_allocated(msp->ms_sm) == 0) {
-		int idx = highbit64(msp->ms_size) - 1;
+		int idx = highbit64(metaslab_weight_size(msp)) - 1;
 		int max_idx = SPACE_MAP_HISTOGRAM_SIZE + shift - 1;
 
 		if (idx < max_idx) {
@@ -2099,6 +2122,7 @@ metaslab_should_allocate(metaslab_t *msp, uint64_t asize)
 	}
 	return (should_allocate);
 }
+
 static uint64_t
 metaslab_weight(metaslab_t *msp)
 {

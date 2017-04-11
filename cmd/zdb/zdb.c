@@ -877,9 +877,10 @@ dump_metaslab(metaslab_t *msp)
 	zdb_nicenum(msp->ms_size - space_map_allocated(sm), freebuf);
 
 	(void) printf(
-	    "\tmetaslab %6llu   offset %12llx   spacemap %6llu   free   "
-	    "%5s%10s\n",
+	    "\tmetaslab %6llu   offset %12llx   size %10llx   "
+	    "spacemap %6llu   free   %5s%10s\n",
 	    (u_longlong_t)msp->ms_id, (u_longlong_t)msp->ms_start,
+	    (u_longlong_t)msp->ms_size,
 	    (u_longlong_t)space_map_object(sm), freebuf, group);
 
 	if (dump_opt['m'] > 2 && !dump_opt['L']) {
@@ -944,14 +945,14 @@ print_vdev_metaslab_header(vdev_t *vd)
 	    vd->vdev_islog ? "log" : "";
 
 	(void) printf("\tvdev %10llu   %s\n"
-	    "\t%-10s%5llu   %-19s   %-15s   %-12s  %-8s\n",
+	    "\t%-10s%5llu   %-19s   %-15s   %-15s   %-12s  %-8s\n",
 	    (u_longlong_t)vd->vdev_id, bias_str,
 	    "metaslabs", (u_longlong_t)vd->vdev_ms_count,
-	    "offset", "spacemap", "free",
+	    "offset", "size", "spacemap", "free",
 	    (alloc_bias == VDEV_BIAS_SEGREGATE) ? "class" : "");
-	(void) printf("\t%15s   %19s   %15s   %12s  %8s\n",
+	(void) printf("\t%15s   %19s   %15s   %15s   %12s  %8s\n",
 	    "---------------", "-------------------",
-	    "---------------", "------------",
+	    "---------------", "---------------", "------------",
 	    (alloc_bias == VDEV_BIAS_SEGREGATE) ? "--------" : "");
 }
 
