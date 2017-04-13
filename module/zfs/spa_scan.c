@@ -184,6 +184,7 @@ spa_scan_thread(void *arg)
 
 		ASSERT0(range_tree_space(allocd_segs));
 
+		mutex_enter(&msp->ms_sync_lock);
 		mutex_enter(&msp->ms_lock);
 
 		while (msp->ms_condensing) {
@@ -229,16 +230,9 @@ spa_scan_thread(void *arg)
 			VERIFY0(space_map_load(sm, allocd_segs, SM_ALLOC));
 			mutex_exit(&lock);
 			space_map_close(sm);
-
-			/*
-			 * When we are resuming from a paused removal (i.e.
-			 * when importing a pool with a removal in progress),
-			 * discard any state that we have already processed.
-			 * range_tree_clear(svr->svr_allocd_segs, 0,
-			 * start_offset);
-			 */
 		}
 		mutex_exit(&msp->ms_lock);
+		mutex_exit(&msp->ms_sync_lock);
 
 		zfs_dbgmsg("Scanning %llu segments for metaslab %llu",
 		    avl_numnodes(&allocd_segs->rt_root), msp->ms_id);

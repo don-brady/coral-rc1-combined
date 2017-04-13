@@ -1464,7 +1464,9 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 
 	ms = kmem_zalloc(sizeof (metaslab_t), KM_SLEEP);
 	mutex_init(&ms->ms_lock, NULL, MUTEX_DEFAULT, NULL);
+	mutex_init(&ms->ms_sync_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&ms->ms_load_cv, NULL, CV_DEFAULT, NULL);
+
 	ms->ms_id = id;
 	ms->ms_start = id << vd->vdev_ms_shift;
 	ms->ms_size = 1ULL << vd->vdev_ms_shift;
@@ -1742,6 +1744,7 @@ metaslab_fini(metaslab_t *msp)
 	mutex_exit(&msp->ms_lock);
 	cv_destroy(&msp->ms_load_cv);
 	mutex_destroy(&msp->ms_lock);
+	mutex_destroy(&msp->ms_sync_lock);
 
 	kmem_free(msp, sizeof (metaslab_t));
 }
@@ -2520,6 +2523,10 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	 * space map ASSERTs. We drop it whenever we call into the DMU,
 	 * because the DMU can call down to us (e.g. via zio_free()) at
 	 * any time.
+	 *
+	 * The spa_scan_thread() can be reading metaslab state concurrently,
+	 * and it is locked out by the ms_sync_lock. Note that the ms_lock is
+	 * insufficient for this, because it is dropped by space_map_write().
 	 */
 
 	tx = dmu_tx_create_assigned(spa_get_dsl(spa), txg);
@@ -2549,6 +2556,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		}
 	}
 
+	mutex_enter(&msp->ms_sync_lock);
 	mutex_enter(&msp->ms_lock);
 
 	/*
@@ -2668,6 +2676,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		dmu_write(mos, vd->vdev_ms_array, sizeof (uint64_t) *
 		    msp->ms_id, sizeof (uint64_t), &object, tx);
 	}
+	mutex_exit(&msp->ms_sync_lock);
 	dmu_tx_commit(tx);
 }
 
