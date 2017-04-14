@@ -1907,6 +1907,30 @@ dsl_scan_need_resilver(spa_t *spa, const dva_t *dva,
 	return (B_TRUE);
 }
 
+void
+zfs_scan_delay(spa_t *spa, vdev_t *vd,
+    uint64_t maxinflight, int scan_delay, int scan_idle)
+{
+	uint64_t last_io;
+
+	mutex_enter(&spa->spa_scrub_lock);
+	while (spa->spa_scrub_inflight >= maxinflight)
+		cv_wait(&spa->spa_scrub_io_cv, &spa->spa_scrub_lock);
+	spa->spa_scrub_inflight++;
+	mutex_exit(&spa->spa_scrub_lock);
+
+	if (scan_delay == 0)
+		return;
+
+	/*
+	 * If we're seeing recent (scan_idle) "important" I/Os
+	 * then throttle our workload to limit the impact of a scan.
+	 */
+	last_io = (vd != NULL) ? vd->vdev_last_io : spa->spa_last_io;
+	if (ddi_get_lbolt64() - last_io <= scan_idle)
+		delay(scan_delay);
+}
+
 static int
 dsl_scan_scrub_cb(dsl_pool_t *dp,
     const blkptr_t *bp, const zbookmark_phys_t *zb)
@@ -1965,18 +1989,8 @@ dsl_scan_scrub_cb(dsl_pool_t *dp,
 		vdev_t *rvd = spa->spa_root_vdev;
 		uint64_t maxinflight = rvd->vdev_children * zfs_top_maxinflight;
 
-		mutex_enter(&spa->spa_scrub_lock);
-		while (spa->spa_scrub_inflight >= maxinflight)
-			cv_wait(&spa->spa_scrub_io_cv, &spa->spa_scrub_lock);
-		spa->spa_scrub_inflight++;
-		mutex_exit(&spa->spa_scrub_lock);
-
-		/*
-		 * If we're seeing recent (zfs_scan_idle) "important" I/Os
-		 * then throttle our workload to limit the impact of a scan.
-		 */
-		if (ddi_get_lbolt64() - spa->spa_last_io <= zfs_scan_idle)
-			delay(scan_delay);
+		zfs_scan_delay(spa, NULL,
+		    maxinflight, scan_delay, zfs_scan_idle);
 
 		zio_nowait(zio_read(NULL, spa, bp,
 		    abd_alloc_for_io(size, B_FALSE), size, dsl_scan_scrub_done,

@@ -389,6 +389,7 @@ vdev_alloc_common(spa_t *spa, uint_t id, uint64_t guid, vdev_ops_t *ops)
 	vd->vdev_state = VDEV_STATE_CLOSED;
 	vd->vdev_ishole = (ops == &vdev_hole_ops);
 	vd->vdev_cfg = NULL;
+	vd->vdev_last_io = 0;
 
 	/*
 	 * Initialize rate limit structs for events.  We rate limit ZIO delay

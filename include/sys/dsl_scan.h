@@ -142,6 +142,9 @@ void dsl_scan_ds_clone_swapped(struct dsl_dataset *ds1, struct dsl_dataset *ds2,
     struct dmu_tx *tx);
 boolean_t dsl_scan_active(dsl_scan_t *scn);
 
+void zfs_scan_delay(spa_t *spa, vdev_t *vd,
+    uint64_t maxinflight, int delay, int idle);
+
 #ifdef	__cplusplus
 }
 #endif

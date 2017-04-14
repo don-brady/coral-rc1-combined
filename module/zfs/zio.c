@@ -3241,6 +3241,10 @@ zio_vdev_io_start(zio_t *zio)
 		uint64_t new = ddi_get_lbolt64();
 		if (old != new)
 			(void) atomic_cas_64(&spa->spa_last_io, old, new);
+
+		old = vd->vdev_last_io;
+		if (old != new)
+			(void) atomic_cas_64(&vd->vdev_last_io, old, new);
 	}
 
 	align = 1ULL << vd->vdev_top->vdev_ashift;

@@ -57,13 +57,16 @@ spa_scan_done(zio_t *zio)
 	mutex_exit(&spa->spa_scrub_lock);
 }
 
-static int spa_scan_max_rebuild = 4096;
+static int spa_scan_max_rebuild = 512;
+static int spa_scan_delay = 64; /* number of ticks to delay rebuild */
+static int spa_scan_idle = 512;	/* idle window in clock ticks */
 
 static void
 spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 {
 	blkptr_t blk, *bp = &blk;
 	dva_t *dva = bp->blk_dva;
+	int delay = spa_scan_delay;
 	uint64_t psize;
 	spa_t *spa = vd->vdev_spa;
 	boolean_t draid_mirror = B_FALSE;
@@ -75,25 +78,38 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 	/* Calculate psize from asize */
 	if (vd->vdev_ops == &vdev_mirror_ops) {
 		psize = asize;
-		ASSERT3U(asize, ==, vdev_psize_to_asize(vd, psize));
-	} else if (vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift)) {
-		ASSERT0((asize >> ashift) % (1 + vd->vdev_nparity));
-		psize = asize / (1 + vd->vdev_nparity);
-		draid_mirror = B_TRUE;
 	} else {
-		struct vdev_draid_configuration *cfg = vd->vdev_tsd;
+		int c, faulted;
 
-		ASSERT0((asize >> ashift) % (cfg->dcf_data + vd->vdev_nparity));
-		psize = (asize / (cfg->dcf_data + vd->vdev_nparity)) *
-		    cfg->dcf_data;
+		/*
+		 * Initialize faulted to 1, to count the spare vdev we're
+		 * rebuilding, which is not in faulted state.
+		 */
+		for (c = 0, faulted = 1; c < vd->vdev_children; c++) {
+			vdev_t *child = vd->vdev_child[c];
+
+			if (!vdev_readable(child) ||
+			    (!vdev_writeable(child) && spa_writeable(spa)))
+				faulted++;
+		}
+
+		if (faulted == vd->vdev_nparity)
+			delay /= 2; /* critical, go faster */
+
+		if (vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift)) {
+			ASSERT0((asize >> ashift) % (1 + vd->vdev_nparity));
+			psize = asize / (1 + vd->vdev_nparity);
+			draid_mirror = B_TRUE;
+		} else {
+			struct vdev_draid_configuration *cfg = vd->vdev_tsd;
+
+			ASSERT0((asize >> ashift) %
+			    (cfg->dcf_data + vd->vdev_nparity));
+			psize = (asize / (cfg->dcf_data + vd->vdev_nparity)) *
+			    cfg->dcf_data;
+		}
 	}
 	ASSERT3U(asize, ==, vdev_psize_to_asize(vd, psize, offset));
-
-	mutex_enter(&spa->spa_scrub_lock);
-	while (spa->spa_scrub_inflight > spa_scan_max_rebuild)
-		cv_wait(&spa->spa_scrub_io_cv, &spa->spa_scrub_lock);
-	spa->spa_scrub_inflight++;
-	mutex_exit(&spa->spa_scrub_lock);
 
 	BP_ZERO(bp);
 
@@ -113,6 +129,8 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 	BP_SET_LEVEL(bp, 0);
 	BP_SET_DEDUP(bp, 0);
 	BP_SET_BYTEORDER(bp, ZFS_HOST_BYTEORDER);
+
+	zfs_scan_delay(spa, vd, spa_scan_max_rebuild, delay, spa_scan_idle);
 
 	zio_nowait(zio_read(pio, spa, bp,
 	    abd_alloc(psize, B_FALSE), psize, spa_scan_done, NULL,
@@ -154,7 +172,7 @@ spa_scan_thread(void *arg)
 
 	/*
 	 * Wait for newvd's DTL to propagate upward when
-	 * spa_vdev_exit() calls vdev_dtl_reassess().
+	 * spa_vdev_attach()->spa_vdev_exit() calls vdev_dtl_reassess().
 	 */
 	txg_wait_synced(spa->spa_dsl_pool, sscan->ssa_dtl_max);
 
@@ -380,4 +398,10 @@ spa_scan_enabled(const spa_t *spa)
 #if defined(_KERNEL) && defined(HAVE_SPL)
 module_param(spa_scan_max_rebuild, int, 0644);
 MODULE_PARM_DESC(spa_scan_max_rebuild, "Max concurrent SPA rebuild I/Os");
+
+module_param(spa_scan_delay, int, 0644);
+MODULE_PARM_DESC(spa_scan_delay, "Number of ticks to delay SPA rebuild");
+
+module_param(spa_scan_idle, int, 0644);
+MODULE_PARM_DESC(spa_scan_idle, "Idle window in clock ticks for SPA rebuild");
 #endif

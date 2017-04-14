@@ -199,7 +199,8 @@ struct vdev {
 	boolean_t	vdev_ishole;	/* is a hole in the namespace	*/
 	kmutex_t	vdev_queue_lock; /* protects vdev_queue_depth	*/
 	uint64_t	vdev_top_zap;
-	nvlist_t	*vdev_cfg; /* additional configuration		*/
+	uint64_t	vdev_last_io;	  /* lbolt of last non-scan I/O */
+	nvlist_t	*vdev_cfg;    /* additional dRAID configuration */
 	vdev_alloc_bias_t vdev_alloc_bias; /* metaslab allocation bias	*/
 
 	/*
