@@ -87,16 +87,21 @@ function do_fio_run
 				# Start the data collection
 				do_collect_scripts $threads $sync $iosize
 
+				# Start the dstat collection
+				do_collect_dstats $threads $sync $iosize
+
+
 				# This will be part of the output filename.
-				typeset suffix="$sync_str.$iosize-ios.$threads-threads"
+				typeset sync_str=$(get_sync_str $sync)
+				typeset suffix="$sync_str-${iosize}.ios-$threads.threads"
 
-				# Define output file
-				typeset logbase="$(get_perf_output_dir)/$(basename \
+				typeset logbase="$(get_perf_output_dir)/$($BASENAME \
 				    $SUDO_COMMAND)"
-				typeset outfile="$logbase.fio.$suffix"
-
+				typeset outfile="$logbase-fio-$suffix.json"
+	
 				# Start the load
-				log_must fio --output $outfile $FIO_SCRIPTS/$script
+				log_must fio --output=${outfile} --output-format="json" \
+				    $FIO_SCRIPTS/$script
 			done
 		done
 	done
@@ -113,12 +118,12 @@ function do_collect_scripts
 	typeset sync=$2
 	typeset iosize=$3
 
-	[[ -n $collect_scripts ]] || log_fail "No data collection scripts."
+	[[ -n $collect_scripts ]] || return 0
 	[[ -n $PERF_RUNTIME ]] || log_fail "No runtime specified."
 
 	# This will be part of the output filename.
 	typeset sync_str=$(get_sync_str $sync)
-	typeset suffix="$sync_str.$iosize-ios.$threads-threads"
+	typeset suffix="$sync_str-${iosize}.ios-$threads.threads"
 
 	# Add in user supplied scripts and logfiles, if any.
 	typeset oIFS=$IFS
@@ -132,11 +137,41 @@ function do_collect_scripts
 	while [[ $idx -lt "${#collect_scripts[@]}" ]]; do
 		typeset logbase="$(get_perf_output_dir)/$(basename \
 		    $SUDO_COMMAND)"
-		typeset outfile="$logbase.${collect_scripts[$idx + 1]}.$suffix"
+		typeset outfile="$logbase-${collect_scripts[$idx + 1]}-$suffix"
 
 		timeout $PERF_RUNTIME ${collect_scripts[$idx]} >$outfile 2>&1 &
 		((idx += 2))
 	done
+
+	# Need to explicitly return 0 because timeout(1) will kill
+	# a child process and cause us to return non-zero.
+	return 0
+}
+
+#
+# This function iterates through the value pairs in $PERF_COLLECT_SCRIPTS.
+# The script at index N is launched in the background, with its output
+# redirected to a logfile containing the tag specified at index N + 1.
+#
+function do_collect_dstats
+{
+	typeset threads=$1
+	typeset sync=$2
+	typeset iosize=$3
+
+	[[ -n $PERF_RUNTIME ]] || log_fail "No runtime specified."
+
+	# This will be part of the output filename.
+	typeset sync_str=$(get_sync_str $sync)
+	typeset suffix="$sync_str-${iosize}.ios-$threads.threads"
+
+	typeset logbase="$(get_perf_output_dir)/$($BASENAME \
+	    $SUDO_COMMAND)"
+	typeset outfile="$logbase-dstat-$suffix"
+	typeset outcsv="${outfile}.csv"
+	typeset command="dstat -a --noheaders --nocolor --output ${outcsv} 1" 
+
+	$TIMEOUT $PERF_RUNTIME ${command} >$outfile 2>&1 &
 
 	# Need to explicitly return 0 because timeout(1) will kill
 	# a child process and cause us to return non-zero.
