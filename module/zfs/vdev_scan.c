@@ -25,14 +25,14 @@
 #include <sys/vdev_impl.h>
 #include <sys/vdev_draid_impl.h>
 #include <sys/spa_impl.h>
-#include <sys/spa_scan.h>
 #include <sys/metaslab_impl.h>
 #include <sys/dsl_scan.h>
+#include <sys/vdev_scan.h>
 #include <sys/zio.h>
 #include <sys/dmu_tx.h>
 
 static void
-spa_scan_done(zio_t *zio)
+spa_vdev_scan_done(zio_t *zio)
 {
 	spa_t *spa = zio->io_spa;
 	dsl_scan_t *scn = spa->spa_dsl_pool->dp_scan;
@@ -57,16 +57,17 @@ spa_scan_done(zio_t *zio)
 	mutex_exit(&spa->spa_scrub_lock);
 }
 
-static int spa_scan_max_rebuild = 512;
-static int spa_scan_delay = 64; /* number of ticks to delay rebuild */
-static int spa_scan_idle = 512;	/* idle window in clock ticks */
+static int spa_vdev_scan_max_rebuild = 512;
+static int spa_vdev_scan_delay = 64; /* number of ticks to delay rebuild */
+static int spa_vdev_scan_idle = 512; /* idle window in clock ticks */
 
 static void
-spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
+spa_vdev_scan_rebuild_block(zio_t *pio, vdev_t *vd,
+    uint64_t offset, uint64_t asize)
 {
 	blkptr_t blk, *bp = &blk;
 	dva_t *dva = bp->blk_dva;
-	int delay = spa_scan_delay;
+	int delay = spa_vdev_scan_delay;
 	uint64_t psize;
 	spa_t *spa = vd->vdev_spa;
 	boolean_t draid_mirror = B_FALSE;
@@ -130,56 +131,98 @@ spa_scan_rebuild_block(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t asize)
 	BP_SET_DEDUP(bp, 0);
 	BP_SET_BYTEORDER(bp, ZFS_HOST_BYTEORDER);
 
-	zfs_scan_delay(spa, vd, spa_scan_max_rebuild, delay, spa_scan_idle);
+	zfs_scan_delay(spa, vd,
+	    spa_vdev_scan_max_rebuild, delay, spa_vdev_scan_idle);
 
 	zio_nowait(zio_read(pio, spa, bp,
-	    abd_alloc(psize, B_FALSE), psize, spa_scan_done, NULL,
+	    abd_alloc(psize, B_FALSE), psize, spa_vdev_scan_done, NULL,
 	    ZIO_PRIORITY_SCRUB, ZIO_FLAG_SCAN_THREAD | ZIO_FLAG_RAW |
 	    ZIO_FLAG_CANFAIL | ZIO_FLAG_RESILVER, NULL));
 }
 
 static void
-spa_scan_rebuild(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t length)
+spa_vdev_scan_rebuild(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t length)
 {
 	uint64_t max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE, offset);
 
 	while (length > 0) {
 		uint64_t chunksz = MIN(length, max_asize);
 
-		spa_scan_rebuild_block(pio, vd, offset, chunksz);
+		spa_vdev_scan_rebuild_block(pio, vd, offset, chunksz);
 
 		length -= chunksz;
 		offset += chunksz;
 	}
 }
 
-typedef struct {
-	vdev_t	*ssa_vd;
-	uint64_t ssa_dtl_max;
-} spa_scan_arg_t;
+static void
+spa_vdev_scan_draid_rebuild(zio_t *pio, vdev_t *vd, vdev_t *oldvd,
+    uint64_t offset, uint64_t length)
+{
+	uint64_t msi = offset >> vd->vdev_ms_shift;
+	boolean_t mirror;
+
+	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_ops);
+	ASSERT3U(msi, ==, (offset + length - 1) >> vd->vdev_ms_shift);
+
+	mirror = vdev_draid_ms_mirrored(vd, msi);
+
+	while (length > 0) {
+		uint64_t group, group_left, chunksz;
+		char *action = "Skipping";
+
+		/*
+		 * Make sure we don't cross redundancy group boundary
+		 */
+		group = vdev_draid_offset2group(vd, offset, mirror);
+		group_left = vdev_draid_group2offset(vd,
+		    group + 1, mirror) - offset;
+
+		ASSERT(!vdev_draid_is_remainder_group(vd, group, mirror));
+		ASSERT3U(group_left, <=, vdev_draid_get_groupsz(vd, mirror));
+
+		chunksz = MIN(length, group_left);
+		if (vdev_draid_group_degraded(vd, oldvd,
+		    offset, chunksz, mirror)) {
+			action = "Fixing";
+			spa_vdev_scan_rebuild(pio, vd, offset, chunksz);
+		}
+
+		draid_dbg(1, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
+		    action, offset >> 10, chunksz >> 10,
+		    mirror ? "mirrored" : "dRAID");
+
+		length -= chunksz;
+		offset += chunksz;
+	}
+}
 
 static void
-spa_scan_thread(void *arg)
+spa_vdev_scan_thread(void *arg)
 {
-	spa_scan_arg_t *sscan = arg;
-	vdev_t *vd = sscan->ssa_vd->vdev_top;
+	vdev_t *vd = arg;
 	spa_t *spa = vd->vdev_spa;
+	spa_vdev_scan_t *svs = spa->spa_vdev_scan;
 	zio_t *pio = zio_root(spa, NULL, NULL, 0);
 	range_tree_t *allocd_segs;
-	kmutex_t lock;
 	uint64_t msi;
 	int err;
 
+	ASSERT(svs != NULL);
+	ASSERT3P(svs->svs_vdev, ==, vd);
+
+	vd = vd->vdev_top;
 	/*
 	 * Wait for newvd's DTL to propagate upward when
 	 * spa_vdev_attach()->spa_vdev_exit() calls vdev_dtl_reassess().
 	 */
-	txg_wait_synced(spa->spa_dsl_pool, sscan->ssa_dtl_max);
+	txg_wait_synced(spa->spa_dsl_pool, svs->svs_dtl_max);
 
-	mutex_init(&lock, NULL, MUTEX_DEFAULT, NULL);
-	allocd_segs = range_tree_create(NULL, NULL, &lock);
+	allocd_segs = range_tree_create(NULL, NULL, &svs->svs_lock);
 
-	for (msi = 0; msi < vd->vdev_ms_count; msi++) {
+	mutex_enter(&svs->svs_lock);
+
+	for (msi = 0; msi < vd->vdev_ms_count && !svs->svs_thread_exit; msi++) {
 		metaslab_t *msp = vd->vdev_ms[msi];
 
 		ASSERT0(range_tree_space(allocd_segs));
@@ -224,11 +267,10 @@ spa_scan_thread(void *arg)
 			VERIFY0(space_map_open(&sm,
 			    spa->spa_dsl_pool->dp_meta_objset,
 			    msp->ms_sm->sm_object, msp->ms_sm->sm_start,
-			    msp->ms_sm->sm_size, msp->ms_sm->sm_shift, &lock));
-			mutex_enter(&lock);
+			    msp->ms_sm->sm_size, msp->ms_sm->sm_shift,
+			    &svs->svs_lock));
 			space_map_update(sm);
 			VERIFY0(space_map_load(sm, allocd_segs, SM_ALLOC));
-			mutex_exit(&lock);
 			space_map_close(sm);
 		}
 		mutex_exit(&msp->ms_lock);
@@ -237,9 +279,8 @@ spa_scan_thread(void *arg)
 		zfs_dbgmsg("Scanning %llu segments for metaslab %llu",
 		    avl_numnodes(&allocd_segs->rt_root), msp->ms_id);
 
-		mutex_enter(&lock);
-		while (range_tree_space(allocd_segs) != 0) {
-			boolean_t mirror;
+		while (!svs->svs_thread_exit &&
+		    range_tree_space(allocd_segs) != 0) {
 			uint64_t offset, length;
 			range_seg_t *rs = avl_first(&allocd_segs->rt_root);
 
@@ -248,59 +289,21 @@ spa_scan_thread(void *arg)
 			length = rs->rs_end - rs->rs_start;
 
 			range_tree_remove(allocd_segs, offset, length);
-			mutex_exit(&lock);
+			mutex_exit(&svs->svs_lock);
 
 			draid_dbg(1, "MS ("U64FMT" at "U64FMT"K) segment: "
 			    U64FMT"K + "U64FMT"K\n",
 			    msp->ms_id, msp->ms_start >> 10,
 			    (offset - msp->ms_start) >> 10, length >> 10);
 
-			if (vd->vdev_ops == &vdev_mirror_ops) {
-				spa_scan_rebuild(pio, vd, offset, length);
-				mutex_enter(&lock);
-				continue;
-			}
+			if (vd->vdev_ops == &vdev_mirror_ops)
+				spa_vdev_scan_rebuild(pio, vd, offset, length);
+			else
+				spa_vdev_scan_draid_rebuild(pio, vd,
+				    svs->svs_vdev, offset, length);
 
-			ASSERT3P(vd->vdev_ops, ==, &vdev_draid_ops);
-			mirror = vdev_draid_ms_mirrored(vd, msi);
-
-			while (length > 0) {
-				uint64_t group, group_left, chunksz;
-				char *action = "Skipping";
-
-				/*
-				 * HH: make sure we don't cross redundancy
-				 * group boundary
-				 */
-				group =
-				    vdev_draid_offset2group(vd, offset, mirror);
-				group_left = vdev_draid_group2offset(vd,
-				    group + 1, mirror) - offset;
-				ASSERT(!vdev_draid_is_remainder_group(vd,
-				    group, mirror));
-				ASSERT3U(group_left, <=,
-				    vdev_draid_get_groupsz(vd, mirror));
-
-				chunksz = MIN(length, group_left);
-				if (vdev_draid_group_degraded(vd,
-				    sscan->ssa_vd, offset, chunksz, mirror)) {
-					action = "Fixing";
-					spa_scan_rebuild(pio, vd,
-					    offset, chunksz);
-				}
-
-				draid_dbg(1, "\t%s: "U64FMT"K + "U64FMT
-				    "K (%s)\n",
-				    action, offset >> 10, chunksz >> 10,
-				    mirror ? "mirrored" : "dRAID");
-
-				length -= chunksz;
-				offset += chunksz;
-			}
-
-			mutex_enter(&lock);
+			mutex_enter(&svs->svs_lock);
 		}
-		mutex_exit(&lock);
 
 		mutex_enter(&msp->ms_lock);
 
@@ -310,36 +313,55 @@ spa_scan_thread(void *arg)
 		mutex_exit(&msp->ms_lock);
 	}
 
-	range_tree_destroy(allocd_segs);
-	mutex_destroy(&lock);
-	kmem_free(sscan, sizeof (*sscan));
+	mutex_exit(&svs->svs_lock);
 
 	err = zio_wait(pio);
 	if (err != 0) /* HH: handle error */
 		err = SET_ERROR(err);
-	/* HH: we don't use scn_visited_this_txg anyway */
-	spa->spa_dsl_pool->dp_scan->scn_visited_this_txg = 19890604;
+
+	if (svs->svs_thread_exit) {
+		mutex_enter(&svs->svs_lock);
+		range_tree_vacate(allocd_segs, NULL, NULL);
+		mutex_exit(&svs->svs_lock);
+	} else {
+		ASSERT0(range_tree_space(allocd_segs));
+		/* HH: we don't use scn_visited_this_txg anyway */
+		spa->spa_dsl_pool->dp_scan->scn_visited_this_txg = 19890604;
+	}
+
+	range_tree_destroy(allocd_segs);
+
+	mutex_enter(&svs->svs_lock);
+	svs->svs_thread = NULL;
+	cv_broadcast(&svs->svs_cv);
+	mutex_exit(&svs->svs_lock);
+
+	thread_exit();
 }
 
 void
-spa_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t txg)
+spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t txg)
 {
 	dsl_scan_t *scan = spa->spa_dsl_pool->dp_scan;
-	spa_scan_arg_t *sscan_arg;
+	spa_vdev_scan_t *svs;
 
 	scan->scn_vd = oldvd->vdev_top;
 	scan->scn_restart_txg = txg;
 	scan->scn_is_sequential = B_TRUE;
 
-	sscan_arg = kmem_alloc(sizeof (*sscan_arg), KM_SLEEP);
-	sscan_arg->ssa_vd = oldvd;
-	sscan_arg->ssa_dtl_max = txg;
-	(void) thread_create(NULL, 0, spa_scan_thread, sscan_arg, 0, NULL,
-	    TS_RUN, defclsyspri);
+	svs = kmem_zalloc(sizeof (*svs), KM_SLEEP);
+	svs->svs_vdev = oldvd;
+	svs->svs_dtl_max = txg;
+	mutex_init(&svs->svs_lock, NULL, MUTEX_DEFAULT, NULL);
+	cv_init(&svs->svs_cv, NULL, CV_DEFAULT, NULL);
+	ASSERT3P(spa->spa_vdev_scan, ==, NULL);
+	spa->spa_vdev_scan = svs;
+	svs->svs_thread = thread_create(NULL, 0, spa_vdev_scan_thread, oldvd,
+	    0, NULL, TS_RUN, defclsyspri);
 }
 
 void
-spa_scan_setup_sync(dmu_tx_t *tx)
+spa_vdev_scan_setup_sync(dmu_tx_t *tx)
 {
 	dsl_scan_t *scn = dmu_tx_pool(tx)->dp_scan;
 	spa_t *spa = scn->scn_dp->dp_spa;
@@ -371,7 +393,7 @@ spa_scan_setup_sync(dmu_tx_t *tx)
 }
 
 int
-spa_scan_rebuild_cb(dsl_pool_t *dp,
+spa_vdev_scan_rebuild_cb(dsl_pool_t *dp,
     const blkptr_t *bp, const zbookmark_phys_t *zb)
 {
 	/* Rebuild happens in open context and does not use this callback */
@@ -380,22 +402,56 @@ spa_scan_rebuild_cb(dsl_pool_t *dp,
 }
 
 boolean_t
-spa_scan_enabled(const spa_t *spa)
+spa_vdev_scan_enabled(const spa_t *spa)
 {
-	if (spa_scan_max_rebuild > 0)
+	if (spa_vdev_scan_max_rebuild > 0)
 		return (B_TRUE);
 	else
 		return (B_FALSE);
 }
 
+void
+spa_vdev_scan_destroy(spa_t *spa)
+{
+	spa_vdev_scan_t *svs = spa->spa_vdev_scan;
+
+	if (svs == NULL)
+		return;
+
+	spa->spa_vdev_scan = NULL;
+	mutex_destroy(&svs->svs_lock);
+	cv_destroy(&svs->svs_cv);
+	kmem_free(svs, sizeof (*svs));
+}
+
+void
+spa_vdev_scan_sync(spa_t *spa, dmu_tx_t *tx)
+{
+}
+
+void
+spa_vdev_scan_suspend(spa_t *spa)
+{
+	spa_vdev_scan_t *svs = spa->spa_vdev_scan;
+
+	if (svs == NULL)
+		return;
+
+	mutex_enter(&svs->svs_lock);
+	svs->svs_thread_exit = B_TRUE;
+	while (svs->svs_thread != NULL)
+		cv_wait(&svs->svs_cv, &svs->svs_lock);
+	svs->svs_thread_exit = B_FALSE;
+	mutex_exit(&svs->svs_lock);
+}
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
-module_param(spa_scan_max_rebuild, int, 0644);
-MODULE_PARM_DESC(spa_scan_max_rebuild, "Max concurrent SPA rebuild I/Os");
+module_param(spa_vdev_scan_max_rebuild, int, 0644);
+MODULE_PARM_DESC(spa_vdev_scan_max_rebuild, "Max concurrent SPA rebuild I/Os");
 
-module_param(spa_scan_delay, int, 0644);
-MODULE_PARM_DESC(spa_scan_delay, "Number of ticks to delay SPA rebuild");
+module_param(spa_vdev_scan_delay, int, 0644);
+MODULE_PARM_DESC(spa_vdev_scan_delay, "Number of ticks to delay SPA rebuild");
 
-module_param(spa_scan_idle, int, 0644);
-MODULE_PARM_DESC(spa_scan_idle, "Idle window in clock ticks for SPA rebuild");
+module_param(spa_vdev_scan_idle, int, 0644);
+MODULE_PARM_DESC(spa_vdev_scan_idle, "Idle window in clock ticks for SPA rebuild");
 #endif

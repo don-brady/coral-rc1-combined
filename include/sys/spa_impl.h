@@ -125,6 +125,8 @@ typedef enum spa_all_vdev_zap_action {
 	AVZ_ACTION_INITIALIZE
 } spa_avz_action_t;
 
+typedef struct spa_vdev_scan spa_vdev_scan_t;
+
 struct spa {
 	/*
 	 * Fields protected by spa_namespace_lock.
@@ -202,6 +204,9 @@ struct spa {
 	int		spa_async_suspended;	/* async tasks suspended */
 	kcondvar_t	spa_async_cv;		/* wait for thread_exit() */
 	uint16_t	spa_async_tasks;	/* async task mask */
+
+	spa_vdev_scan_t *spa_vdev_scan;
+
 	char		*spa_root;		/* alternate root directory */
 	uint64_t	spa_ena;		/* spa-wide ereport ENA */
 	int		spa_last_open_failed;	/* error if last open failed */

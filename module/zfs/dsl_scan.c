@@ -24,7 +24,6 @@
  * Copyright 2016 Gary Mills
  */
 
-#include <sys/spa_scan.h>
 #include <sys/dsl_scan.h>
 #include <sys/dsl_pool.h>
 #include <sys/dsl_dataset.h>
@@ -42,6 +41,7 @@
 #include <sys/zfs_znode.h>
 #include <sys/spa_impl.h>
 #include <sys/vdev_impl.h>
+#include <sys/vdev_scan.h>
 #include <sys/zil_impl.h>
 #include <sys/zio_checksum.h>
 #include <sys/ddt.h>
@@ -90,9 +90,9 @@ int zfs_free_bpobj_enabled = 1;
 /* the order has to match pool_scan_type */
 static scan_cb_t *scan_funcs[POOL_SCAN_FUNCS] = {
 	NULL,
-	dsl_scan_scrub_cb,	/* POOL_SCAN_SCRUB */
-	dsl_scan_scrub_cb,	/* POOL_SCAN_RESILVER */
-	spa_scan_rebuild_cb,	/* POOL_SCAN_REBUILD */
+	dsl_scan_scrub_cb,		/* POOL_SCAN_SCRUB */
+	dsl_scan_scrub_cb,		/* POOL_SCAN_RESILVER */
+	spa_vdev_scan_rebuild_cb,	/* POOL_SCAN_REBUILD */
 };
 
 int
@@ -1547,7 +1547,7 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 		zfs_dbgmsg("restarting scan func=%u txg=%llu",
 		    func, tx->tx_txg);
 		if (func == POOL_SCAN_REBUILD)
-			spa_scan_setup_sync(tx);
+			spa_vdev_scan_setup_sync(tx);
 		else
 			dsl_scan_setup_sync(&func, tx);
 	}
@@ -1579,6 +1579,11 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 			dsl_scan_done(scn, B_TRUE, tx);
 			scn->scn_visited_this_txg = 0;
 			dsl_scan_sync_state(scn, tx);
+
+			ASSERT(spa->spa_vdev_scan != NULL);
+			/* Ensure the spa_vdev_scan thread has completed */
+			spa_vdev_scan_suspend(spa);
+			spa_vdev_scan_destroy(spa);
 		}
 		/* Rebuild is mostly handled in the open-context scan thread */
 		return;

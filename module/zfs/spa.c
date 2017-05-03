@@ -72,8 +72,8 @@
 #include <sys/systeminfo.h>
 #include <sys/spa_boot.h>
 #include <sys/zfs_ioctl.h>
-#include <sys/spa_scan.h>
 #include <sys/dsl_scan.h>
+#include <sys/vdev_scan.h>
 #include <sys/zfeature.h>
 #include <sys/dsl_destroy.h>
 #include <sys/zvol.h>
@@ -1398,6 +1398,8 @@ spa_unload(spa_t *spa)
 		kmem_free(spa->spa_async_zio_root, max_ncpus * sizeof (void *));
 		spa->spa_async_zio_root = NULL;
 	}
+
+	spa_vdev_scan_destroy(spa);
 
 	bpobj_close(&spa->spa_deferred_bpobj);
 
@@ -4756,6 +4758,9 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 
 	txg = spa_vdev_enter(spa);
 
+	if (spa->spa_vdev_scan != NULL)
+		return (spa_vdev_exit(spa, NULL, txg, EBUSY));
+
 	oldvd = spa_lookup_by_guid(spa, guid, B_FALSE);
 
 	if (oldvd == NULL)
@@ -4923,7 +4928,7 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	 */
 	vdev_dirty(tvd, VDD_DTL, newvd, txg);
 
-	if (spa_scan_enabled(spa) &&
+	if (spa_vdev_scan_enabled(spa) &&
 	    ((tvd->vdev_ops == &vdev_mirror_ops && spa_rebuild_mirror != 0) ||
 	    newvd->vdev_ops == &vdev_draid_spare_ops))
 		rebuild = B_TRUE; /* HH: let zpool cmd choose */
@@ -4934,7 +4939,7 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	 * respective datasets.
 	 */
 	if (rebuild)
-		spa_scan_start(spa, oldvd, dtl_max_txg);
+		spa_vdev_scan_start(spa, oldvd, dtl_max_txg);
 	else
 		dsl_resilver_restart(spa->spa_dsl_pool, dtl_max_txg);
 
@@ -5967,8 +5972,12 @@ spa_scan(spa_t *spa, pool_scan_func_t func)
 {
 	ASSERT(spa_config_held(spa, SCL_ALL, RW_WRITER) == 0);
 
-	if (func >= POOL_SCAN_FUNCS || func == POOL_SCAN_NONE)
+	if (func >= POOL_SCAN_FUNCS ||
+	    func == POOL_SCAN_NONE || func == POOL_SCAN_REBUILD)
 		return (SET_ERROR(ENOTSUP));
+
+	if (spa->spa_vdev_scan != NULL)
+		return (SET_ERROR(EBUSY));
 
 	/*
 	 * If a resilver was requested, but there is no DTL on a
@@ -6148,6 +6157,8 @@ spa_async_suspend(spa_t *spa)
 	while (spa->spa_async_thread != NULL)
 		cv_wait(&spa->spa_async_cv, &spa->spa_async_lock);
 	mutex_exit(&spa->spa_async_lock);
+
+	spa_vdev_scan_suspend(spa);
 }
 
 void
@@ -6849,6 +6860,9 @@ spa_sync(spa_t *spa, uint64_t txg)
 
 		ddt_sync(spa, txg);
 		dsl_scan_sync(dp, tx);
+
+		if (spa->spa_vdev_scan != NULL)
+			spa_vdev_scan_sync(spa, tx);
 
 		while ((vd = txg_list_remove(&spa->spa_vdev_txg_list, txg)))
 			vdev_sync(vd, txg);

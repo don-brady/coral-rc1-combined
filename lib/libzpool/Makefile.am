@@ -86,7 +86,6 @@ KERNEL_C = \
 	spa_history.c \
 	spa_misc.c \
 	spa_stats.c \
-	spa_scan.c \
 	space_map.c \
 	space_reftree.c \
 	txg.c \
@@ -94,6 +93,7 @@ KERNEL_C = \
 	uberblock.c \
 	unique.c \
 	vdev.c \
+	vdev_scan.c \
 	vdev_cache.c \
 	vdev_file.c \
 	vdev_label.c \
