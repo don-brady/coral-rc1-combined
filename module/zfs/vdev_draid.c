@@ -1115,9 +1115,6 @@ vdev_draid_io_start(zio_t *zio)
 		(void) vdev_draid_mirror_map_alloc(zio, ashift, cfg, NULL);
 
 		ASSERT(zio->io_vsd != NULL);
-		ASSERT(zio->io_size <= (1ULL << ashift) ||
-		    ((zio->io_flags & ZIO_FLAG_RESILVER) &&
-		    zio->io_spa->spa_dsl_pool->dp_scan->scn_is_sequential));
 		vdev_mirror_ops.vdev_op_io_start(zio);
 		return;
 	}
