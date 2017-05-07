@@ -1354,6 +1354,7 @@ spa_unload(spa_t *spa)
 	 * Stop async tasks.
 	 */
 	spa_async_suspend(spa);
+	spa_vdev_scan_suspend(spa);
 
 	/*
 	 * Stop syncing.
@@ -5084,6 +5085,17 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 		unspare = B_TRUE;
 
 	/*
+	 * If we are detaching a draid spare that is being rebuilt, we need to
+	 * abort the rebuild thread.
+	 */
+	if (replace_done == 0 &&
+	    pvd->vdev_ops == &vdev_spare_ops &&
+	    vd->vdev_ops == &vdev_draid_spare_ops &&
+	    spa->spa_vdev_scan != NULL &&
+	    spa->spa_vdev_scan->svs_vdev->vdev_parent == pvd)
+		spa->spa_vdev_scan->svs_thread_exit = B_TRUE;
+
+	/*
 	 * Erase the disk labels so the disk can be used for other things.
 	 * This must be done after all other error cases are handled,
 	 * but before we disembowel vd (so we can still do I/O to it).
@@ -6157,8 +6169,6 @@ spa_async_suspend(spa_t *spa)
 	while (spa->spa_async_thread != NULL)
 		cv_wait(&spa->spa_async_cv, &spa->spa_async_lock);
 	mutex_exit(&spa->spa_async_lock);
-
-	spa_vdev_scan_suspend(spa);
 }
 
 void

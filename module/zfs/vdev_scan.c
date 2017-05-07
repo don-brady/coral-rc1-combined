@@ -141,11 +141,12 @@ spa_vdev_scan_rebuild_block(zio_t *pio, vdev_t *vd,
 }
 
 static void
-spa_vdev_scan_rebuild(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t length)
+spa_vdev_scan_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
+    vdev_t *vd, uint64_t offset, uint64_t length)
 {
 	uint64_t max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE, offset);
 
-	while (length > 0) {
+	while (length > 0 && !svs->svs_thread_exit) {
 		uint64_t chunksz = MIN(length, max_asize);
 
 		spa_vdev_scan_rebuild_block(pio, vd, offset, chunksz);
@@ -156,8 +157,8 @@ spa_vdev_scan_rebuild(zio_t *pio, vdev_t *vd, uint64_t offset, uint64_t length)
 }
 
 static void
-spa_vdev_scan_draid_rebuild(zio_t *pio, vdev_t *vd, vdev_t *oldvd,
-    uint64_t offset, uint64_t length)
+spa_vdev_scan_draid_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
+    vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t length)
 {
 	uint64_t msi = offset >> vd->vdev_ms_shift;
 	boolean_t mirror;
@@ -167,7 +168,7 @@ spa_vdev_scan_draid_rebuild(zio_t *pio, vdev_t *vd, vdev_t *oldvd,
 
 	mirror = vdev_draid_ms_mirrored(vd, msi);
 
-	while (length > 0) {
+	while (length > 0 && !svs->svs_thread_exit) {
 		uint64_t group, group_left, chunksz;
 		char *action = "Skipping";
 
@@ -185,7 +186,7 @@ spa_vdev_scan_draid_rebuild(zio_t *pio, vdev_t *vd, vdev_t *oldvd,
 		if (vdev_draid_group_degraded(vd, oldvd,
 		    offset, chunksz, mirror)) {
 			action = "Fixing";
-			spa_vdev_scan_rebuild(pio, vd, offset, chunksz);
+			spa_vdev_scan_rebuild(svs, pio, vd, offset, chunksz);
 		}
 
 		draid_dbg(1, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
@@ -297,9 +298,10 @@ spa_vdev_scan_thread(void *arg)
 			    (offset - msp->ms_start) >> 10, length >> 10);
 
 			if (vd->vdev_ops == &vdev_mirror_ops)
-				spa_vdev_scan_rebuild(pio, vd, offset, length);
+				spa_vdev_scan_rebuild(svs, pio,
+				    vd, offset, length);
 			else
-				spa_vdev_scan_draid_rebuild(pio, vd,
+				spa_vdev_scan_draid_rebuild(svs, pio, vd,
 				    svs->svs_vdev, offset, length);
 
 			mutex_enter(&svs->svs_lock);
@@ -323,12 +325,9 @@ spa_vdev_scan_thread(void *arg)
 		mutex_enter(&svs->svs_lock);
 		range_tree_vacate(allocd_segs, NULL, NULL);
 		mutex_exit(&svs->svs_lock);
-	} else {
-		ASSERT0(range_tree_space(allocd_segs));
-		/* HH: we don't use scn_visited_this_txg anyway */
-		spa->spa_dsl_pool->dp_scan->scn_visited_this_txg = 19890604;
 	}
 
+	ASSERT0(range_tree_space(allocd_segs));
 	range_tree_destroy(allocd_segs);
 
 	mutex_enter(&svs->svs_lock);
@@ -345,10 +344,6 @@ spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t txg)
 	dsl_scan_t *scan = spa->spa_dsl_pool->dp_scan;
 	spa_vdev_scan_t *svs;
 
-	scan->scn_vd = oldvd->vdev_top;
-	scan->scn_restart_txg = txg;
-	scan->scn_is_sequential = B_TRUE;
-
 	svs = kmem_zalloc(sizeof (*svs), KM_SLEEP);
 	svs->svs_vdev = oldvd;
 	svs->svs_dtl_max = txg;
@@ -358,6 +353,9 @@ spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t txg)
 	spa->spa_vdev_scan = svs;
 	svs->svs_thread = thread_create(NULL, 0, spa_vdev_scan_thread, oldvd,
 	    0, NULL, TS_RUN, defclsyspri);
+
+	scan->scn_is_sequential = B_TRUE;
+	scan->scn_restart_txg = txg;
 }
 
 void
@@ -366,9 +364,9 @@ spa_vdev_scan_setup_sync(dmu_tx_t *tx)
 	dsl_scan_t *scn = dmu_tx_pool(tx)->dp_scan;
 	spa_t *spa = scn->scn_dp->dp_spa;
 
-	ASSERT(scn->scn_vd != NULL);
 	ASSERT(scn->scn_is_sequential);
 	ASSERT(scn->scn_phys.scn_state != DSS_SCANNING);
+	ASSERT(spa->spa_vdev_scan != NULL);
 
 	bzero(&scn->scn_phys, sizeof (scn->scn_phys));
 	scn->scn_phys.scn_func = POOL_SCAN_REBUILD;
@@ -379,7 +377,8 @@ spa_vdev_scan_setup_sync(dmu_tx_t *tx)
 	scn->scn_phys.scn_start_time = gethrestime_sec();
 	scn->scn_phys.scn_errors = 0;
 	/* Rebuild only examines blocks on one vdev */
-	scn->scn_phys.scn_to_examine = scn->scn_vd->vdev_stat.vs_alloc;
+	scn->scn_phys.scn_to_examine =
+	    spa->spa_vdev_scan->svs_vdev->vdev_top->vdev_stat.vs_alloc;
 	scn->scn_restart_txg = 0;
 	scn->scn_done_txg = 0;
 
@@ -441,7 +440,6 @@ spa_vdev_scan_suspend(spa_t *spa)
 	svs->svs_thread_exit = B_TRUE;
 	while (svs->svs_thread != NULL)
 		cv_wait(&svs->svs_cv, &svs->svs_lock);
-	svs->svs_thread_exit = B_FALSE;
 	mutex_exit(&svs->svs_lock);
 }
 

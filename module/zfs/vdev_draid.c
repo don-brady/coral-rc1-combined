@@ -1157,7 +1157,7 @@ vdev_draid_io_start(zio_t *zio)
 
 	ASSERT(zio->io_type == ZIO_TYPE_READ);
 	/*
-	 * HH: sequential resilver must do IO at redundancy group boundary, i.e.
+	 * Sequential rebuild must do IO at redundancy group boundary, i.e.
 	 * rm->rm_nskip must be 0
 	 */
 	ASSERT((zio->io_flags & ZIO_FLAG_RESILVER) == 0 ||

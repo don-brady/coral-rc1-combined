@@ -231,6 +231,7 @@ dsl_scan_setup_sync(void *arg, dmu_tx_t *tx)
 
 	ASSERT(scn->scn_phys.scn_state != DSS_SCANNING);
 	ASSERT(*funcp > POOL_SCAN_NONE && *funcp < POOL_SCAN_FUNCS);
+	ASSERT(*funcp != POOL_SCAN_REBUILD);
 	bzero(&scn->scn_phys, sizeof (scn->scn_phys));
 	scn->scn_phys.scn_func = *funcp;
 	scn->scn_phys.scn_state = DSS_SCANNING;
@@ -395,6 +396,8 @@ dsl_scan_cancel_check(void *arg, dmu_tx_t *tx)
 
 	if (scn->scn_phys.scn_state != DSS_SCANNING)
 		return (SET_ERROR(ENOENT));
+	if (DSL_SCAN_IS_REBUILD(scn))
+		return (SET_ERROR(ENOTSUP));
 	return (0);
 }
 
@@ -1572,18 +1575,26 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 	if (!scn->scn_async_stalled && !dsl_scan_active(scn))
 		return;
 
-	if (DSL_SCAN_IS_REBUILD(scn)) {
-		if (scn->scn_visited_this_txg == 19890604) {
-			ASSERT(!scn->scn_pausing);
-			/* finished with scan. */
-			dsl_scan_done(scn, B_TRUE, tx);
-			scn->scn_visited_this_txg = 0;
+	if (DSL_SCAN_IS_REBUILD(scn) &&
+	    scn->scn_phys.scn_state == DSS_SCANNING) {
+		spa_vdev_scan_t *svs = spa->spa_vdev_scan;
+		boolean_t done;
+
+		ASSERT(svs != NULL);
+		ASSERT(scn->scn_is_sequential);
+
+		mutex_enter(&svs->svs_lock);
+		done = (svs->svs_thread == NULL) ? B_TRUE : B_FALSE;
+		mutex_exit(&svs->svs_lock);
+
+		if (done) {
+			boolean_t complete = !svs->svs_thread_exit;
+
+			dsl_scan_done(scn, complete, tx);
 			dsl_scan_sync_state(scn, tx);
 
-			ASSERT(spa->spa_vdev_scan != NULL);
-			/* Ensure the spa_vdev_scan thread has completed */
-			spa_vdev_scan_suspend(spa);
 			spa_vdev_scan_destroy(spa);
+			svs = NULL;
 		}
 		/* Rebuild is mostly handled in the open-context scan thread */
 		return;
@@ -1790,7 +1801,6 @@ dsl_resilver_restart(dsl_pool_t *dp, uint64_t txg)
 	} else {
 		dp->dp_scan->scn_restart_txg = txg;
 	}
-	dp->dp_scan->scn_vd = NULL;
 	dp->dp_scan->scn_is_sequential = B_FALSE;
 	zfs_dbgmsg("restarting resilver txg=%llu", txg);
 }
@@ -1798,8 +1808,11 @@ dsl_resilver_restart(dsl_pool_t *dp, uint64_t txg)
 boolean_t
 dsl_scan_resilvering(dsl_pool_t *dp)
 {
-	return (dp->dp_scan->scn_phys.scn_state == DSS_SCANNING &&
-	    dp->dp_scan->scn_phys.scn_func == POOL_SCAN_RESILVER);
+	dsl_scan_t *scn = dp->dp_scan;
+
+	return (scn->scn_phys.scn_state == DSS_SCANNING &&
+	    (scn->scn_phys.scn_func == POOL_SCAN_RESILVER ||
+	    DSL_SCAN_IS_REBUILD(scn)));
 }
 
 /*
