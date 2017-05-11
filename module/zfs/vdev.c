@@ -523,14 +523,14 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 	}
 	ASSERT(nparity != -1ULL);
 
-<<<<<<< HEAD
 	if (ops == &vdev_draid_ops) {
 		if (nvlist_lookup_nvlist(nv,
 		    ZPOOL_CONFIG_DRAIDCFG, &draidcfg) != 0)
 			return (SET_ERROR(EINVAL));
 		if (!vdev_draid_config_validate(NULL, draidcfg))
 			return (SET_ERROR(EINVAL));
-=======
+	}
+
 	/*
 	 * If creating a top-level vdev, check for allocation classes input
 	 */
@@ -573,21 +573,18 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 				alloc_bias = VDEV_BIAS_SEGREGATE;
 			}
 		}
->>>>>>> a3ae3d328e5307a2366bbe2e5893ff70b44f10d8
 	}
 
 	vd = vdev_alloc_common(spa, id, guid, ops);
 
 	vd->vdev_islog = islog;
 	vd->vdev_nparity = nparity;
-<<<<<<< HEAD
+
 	if (ops == &vdev_draid_ops)
 		vd->vdev_cfg = fnvlist_dup(draidcfg);
-=======
+	
 	if (top_level && alloc_bias != VDEV_BIAS_NONE)
 		vd->vdev_alloc_bias = alloc_bias;
-
->>>>>>> a3ae3d328e5307a2366bbe2e5893ff70b44f10d8
 
 	if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PATH, &vd->vdev_path) == 0)
 		vd->vdev_path = spa_strdup(vd->vdev_path);

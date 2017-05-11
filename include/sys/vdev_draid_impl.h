@@ -79,7 +79,7 @@ extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
 #define	DVA_SET_DRAID_MIRROR(dva, x)	BF64_SET((dva)->dva_word[0], 31, 1, x)
 
 /* trace_printk is GPL only */
-#define	DRAID_USE_TRACE_PRINTK
+#undef	DRAID_USE_TRACE_PRINTK
 
 #ifdef _KERNEL
 #define	U64FMT "%llu"

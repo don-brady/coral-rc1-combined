@@ -2508,8 +2508,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	 */
 	if (range_tree_space(alloctree) == 0 &&
 	    range_tree_space(msp->ms_freeingtree) == 0 &&
-	    !(msp->ms_loaded && msp->ms_condense_wanted &&
-	    force_sm_object))
+	    !(msp->ms_loaded && msp->ms_condense_wanted))
 		return;
 
 
@@ -3237,7 +3236,7 @@ metaslab_block_alloc(metaslab_t *msp, uint64_t size,
 
 static uint64_t
 metaslab_group_alloc_normal(metaslab_group_t *mg, zio_alloc_list_t *zal,
-    uint64_t asize, metaslab_block_category_t blkcat, uint64_t txg,
+    uint64_t psize, metaslab_block_category_t blkcat, uint64_t txg,
     boolean_t want_unique, dva_t *dva, int d)
 {
 	vdev_t *vd = mg->mg_vd;
@@ -3432,13 +3431,13 @@ next:
 
 static uint64_t
 metaslab_group_alloc(metaslab_group_t *mg, zio_alloc_list_t *zal,
-    uint64_t asize, metaslab_block_category_t blkcat, uint64_t txg,
+    uint64_t psize, metaslab_block_category_t blkcat, uint64_t txg,
     boolean_t want_unique, dva_t *dva, int d)
 {
 	uint64_t offset;
 	ASSERT(mg->mg_initialized);
 
-	offset = metaslab_group_alloc_normal(mg, zal, asize, blkcat, txg,
+	offset = metaslab_group_alloc_normal(mg, zal, psize, blkcat, txg,
 	    want_unique, dva, d);
 
 	mutex_enter(&mg->mg_lock);
@@ -3607,16 +3606,13 @@ top:
 
 		ASSERT(mg->mg_class == mc);
 
-		asize = vdev_psize_to_asize(vd, psize);
-		ASSERT(P2PHASE(asize, 1ULL << vd->vdev_ashift) == 0);
-
 		/*
 		 * If we don't need to try hard, then require that the
 		 * block be on an different metaslab from any other DVAs
 		 * in this BP (unique=true).  If we are trying hard, then
 		 * allow any metaslab to be used (unique=false).
 		 */
-		offset = metaslab_group_alloc(mg, zal, asize, blkcat, txg,
+		offset = metaslab_group_alloc(mg, zal, psize, blkcat, txg,
 		    !try_hard, dva, d);
 
 		if (offset != -1ULL) {
@@ -3764,7 +3760,6 @@ metaslab_free_dva(spa_t *spa, const dva_t *dva,
 		if (range_tree_space(msp->ms_freeingtree) == 0)
 			vdev_dirty(vd, VDD_METASLAB, msp, txg);
 		range_tree_add(msp->ms_freeingtree, offset, size);
-		metaslab_block_track(msp, -size, blkcat, blkbirth, txg);
 	}
 	metaslab_block_track(msp, -size, blkcat, blkbirth, txg);
 

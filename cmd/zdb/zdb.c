@@ -4418,7 +4418,7 @@ main(int argc, char **argv)
 		spa_config_path = spa_config_path_env;
 
 	while ((c = getopt(argc, argv,
-	    "AbcCdDeFGhiI:lLmMo:Op:PqRsSt:uU:vVx:Xy")) != -1) {
+	    "AbcCdDeFGhiI:lLmMo:Op:PqRsSt:uU:vVx:X")) != -1) {
 		switch (c) {
 		case 'b':
 		case 'c':
@@ -4497,15 +4497,6 @@ main(int argc, char **argv)
 			break;
 		case 'x':
 			vn_dumpdir = optarg;
-			break;
-		case 'y':
-			/* HH todo: allow multiple draidcfg to be specified in case
-			 * there are multiple draid vdevs in the pool
-			 */
-			draidcfg = draidcfg_read_file(optarg);
-			if (draidcfg == NULL)
-				(void) fprintf(stderr,
-				    "invalid draid configuration '%s'\n", optarg);
 			break;
 		default:
 			usage();

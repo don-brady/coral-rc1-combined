@@ -5696,6 +5696,9 @@ spa_vdev_remove(spa_t *spa, uint64_t guid, boolean_t unspare)
 			if (vd == NULL && draid_spare) {
 				error = SET_ERROR(ENOTSUP);
 			} else {
+				if (vd == NULL)
+					vd = spa_lookup_by_guid(spa, guid, B_TRUE);
+				spa_event_notify(spa, vd, ESC_ZFS_VDEV_REMOVE_AUX);
 				spa_vdev_remove_aux(spa->spa_spares.sav_config,
 				    ZPOOL_CONFIG_SPARES, spares, nspares, nv);
 				spa_load_spares(spa);
