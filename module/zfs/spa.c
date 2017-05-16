@@ -3099,8 +3099,14 @@ spa_load_impl(spa_t *spa, uint64_t pool_guid, nvlist_t *config,
 		 * Check all DTLs to see if anything needs resilvering.
 		 */
 		if (!dsl_scan_resilvering(spa->spa_dsl_pool) &&
-		    vdev_resilver_needed(rvd, NULL, NULL))
-			spa_async_request(spa, SPA_ASYNC_RESILVER);
+		    vdev_resilver_needed(rvd, NULL, NULL)) {
+			vdev_t *dspare = vdev_rebuild_needed(rvd);
+
+			if (dspare == NULL)
+				spa_async_request(spa, SPA_ASYNC_RESILVER);
+			else
+				spa_vdev_scan_restart(dspare);
+		}
 
 		/*
 		 * Log the fact that we booted up (so that we can detect if
@@ -4940,7 +4946,7 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	 * respective datasets.
 	 */
 	if (rebuild)
-		spa_vdev_scan_start(spa, oldvd, dtl_max_txg);
+		spa_vdev_scan_start(spa, oldvd, 0, dtl_max_txg);
 	else
 		dsl_resilver_restart(spa->spa_dsl_pool, dtl_max_txg);
 
@@ -6870,9 +6876,6 @@ spa_sync(spa_t *spa, uint64_t txg)
 
 		ddt_sync(spa, txg);
 		dsl_scan_sync(dp, tx);
-
-		if (spa->spa_vdev_scan != NULL)
-			spa_vdev_scan_sync(spa, tx);
 
 		while ((vd = txg_list_remove(&spa->spa_vdev_txg_list, txg)))
 			vdev_sync(vd, txg);

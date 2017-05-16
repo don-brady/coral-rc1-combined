@@ -79,8 +79,6 @@ unsigned long zfs_free_max_blocks = 100000;
 #define	DSL_SCAN_IS_SCRUB_RESILVER(scn) \
 	((scn)->scn_phys.scn_func == POOL_SCAN_SCRUB || \
 	(scn)->scn_phys.scn_func == POOL_SCAN_RESILVER)
-#define	DSL_SCAN_IS_REBUILD(scn) \
-	((scn)->scn_phys.scn_func == POOL_SCAN_REBUILD)
 
 /*
  * Enable/disable the processing of the free_bpobj object.
@@ -192,6 +190,12 @@ dsl_scan_init(dsl_pool_t *dp, uint64_t txg)
 			zfs_dbgmsg("new-style scrub was modified "
 			    "by old software; restarting in txg %llu",
 			    scn->scn_restart_txg);
+		}
+
+		if (DSL_SCAN_IS_REBUILD(scn) &&
+		    scn->scn_phys.scn_state == DSS_SCANNING) {
+			ASSERT3P(spa->spa_vdev_scan, ==, NULL);
+			scn->scn_phys.scn_state = DSS_CANCELED;
 		}
 	}
 
@@ -1575,30 +1579,6 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 	if (!scn->scn_async_stalled && !dsl_scan_active(scn))
 		return;
 
-	if (DSL_SCAN_IS_REBUILD(scn) &&
-	    scn->scn_phys.scn_state == DSS_SCANNING) {
-		spa_vdev_scan_t *svs = spa->spa_vdev_scan;
-		boolean_t done;
-
-		ASSERT(svs != NULL);
-		ASSERT(scn->scn_is_sequential);
-
-		mutex_enter(&svs->svs_lock);
-		done = (svs->svs_thread == NULL) ? B_TRUE : B_FALSE;
-		mutex_exit(&svs->svs_lock);
-
-		if (done) {
-			boolean_t complete = !svs->svs_thread_exit;
-
-			dsl_scan_done(scn, complete, tx);
-			dsl_scan_sync_state(scn, tx);
-
-			spa_vdev_scan_destroy(spa);
-			svs = NULL;
-		}
-		/* Rebuild is mostly handled in the open-context scan thread */
-		return;
-	}
 
 	scn->scn_visited_this_txg = 0;
 	scn->scn_pausing = B_FALSE;
@@ -1721,6 +1701,33 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 
 	if (scn->scn_phys.scn_state != DSS_SCANNING)
 		return;
+
+	if (DSL_SCAN_IS_REBUILD(scn)) {
+		spa_vdev_scan_t *svs = spa->spa_vdev_scan;
+		boolean_t done;
+
+		ASSERT(svs != NULL);
+		ASSERT(scn->scn_is_sequential);
+
+		mutex_enter(&svs->svs_lock);
+		done = (svs->svs_thread == NULL) ? B_TRUE : B_FALSE;
+		mutex_exit(&svs->svs_lock);
+
+		if (done) {
+			boolean_t complete = !svs->svs_thread_exit;
+
+			dsl_scan_done(scn, complete, tx);
+			dsl_scan_sync_state(scn, tx);
+
+			spa_vdev_scan_destroy(spa);
+			scn->scn_is_sequential = B_FALSE;
+			svs = NULL;
+		} else {
+			spa_vdev_scan_sync(spa, tx);
+		}
+		/* Rebuild is mostly handled in the open-context scan thread */
+		return;
+	}
 
 	if (scn->scn_done_txg == tx->tx_txg) {
 		ASSERT(!scn->scn_pausing);

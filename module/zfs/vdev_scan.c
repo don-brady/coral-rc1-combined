@@ -213,17 +213,18 @@ spa_vdev_scan_thread(void *arg)
 	ASSERT3P(svs->svs_vdev, ==, vd);
 
 	vd = vd->vdev_top;
+	ASSERT3U(svs->svs_msi, <, vd->vdev_ms_count);
 	/*
 	 * Wait for newvd's DTL to propagate upward when
 	 * spa_vdev_attach()->spa_vdev_exit() calls vdev_dtl_reassess().
 	 */
 	txg_wait_synced(spa->spa_dsl_pool, svs->svs_dtl_max);
-
 	allocd_segs = range_tree_create(NULL, NULL, &svs->svs_lock);
 
 	mutex_enter(&svs->svs_lock);
 
-	for (msi = 0; msi < vd->vdev_ms_count && !svs->svs_thread_exit; msi++) {
+	for (msi = svs->svs_msi;
+	    msi < vd->vdev_ms_count && !svs->svs_thread_exit; msi++) {
 		metaslab_t *msp = vd->vdev_ms[msi];
 
 		ASSERT0(range_tree_space(allocd_segs));
@@ -339,12 +340,14 @@ spa_vdev_scan_thread(void *arg)
 }
 
 void
-spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t txg)
+spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t msi, uint64_t txg)
 {
 	dsl_scan_t *scan = spa->spa_dsl_pool->dp_scan;
-	spa_vdev_scan_t *svs;
+	spa_vdev_scan_t *svs = kmem_zalloc(sizeof (*svs), KM_SLEEP);
 
-	svs = kmem_zalloc(sizeof (*svs), KM_SLEEP);
+	ASSERT3U(msi, <, oldvd->vdev_top->vdev_ms_count);
+
+	svs->svs_msi = msi;
 	svs->svs_vdev = oldvd;
 	svs->svs_dtl_max = txg;
 	mutex_init(&svs->svs_lock, NULL, MUTEX_DEFAULT, NULL);
@@ -356,6 +359,24 @@ spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t txg)
 
 	scan->scn_is_sequential = B_TRUE;
 	scan->scn_restart_txg = txg;
+}
+
+void
+spa_vdev_scan_restart(vdev_t *vd)
+{
+	spa_t *spa = vd->vdev_spa;
+	vdev_t *pvd = vd->vdev_parent;
+
+	ASSERT(pvd != NULL);
+	ASSERT3U(pvd->vdev_children, ==, 2);
+	ASSERT3P(pvd->vdev_ops, ==, &vdev_spare_ops);
+	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_spare_ops);
+
+	if (spa->spa_vdev_scan != NULL)
+		return;
+
+	spa_vdev_scan_start(spa, pvd->vdev_child[0], 0,
+	    spa_last_synced_txg(spa) + 1 + TXG_CONCURRENT_STATES);
 }
 
 void

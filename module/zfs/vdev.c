@@ -35,6 +35,7 @@
 #include <sys/dmu.h>
 #include <sys/dmu_tx.h>
 #include <sys/vdev_impl.h>
+#include <sys/vdev_scan.h>
 #include <sys/vdev_draid_impl.h>
 #include <sys/uberblock_impl.h>
 #include <sys/metaslab.h>
@@ -2542,6 +2543,25 @@ vdev_resilver_needed(vdev_t *vd, uint64_t *minp, uint64_t *maxp)
 		*maxp = thismax;
 	}
 	return (needed);
+}
+
+vdev_t *
+vdev_rebuild_needed(vdev_t *rvd)
+{
+	int c;
+
+	for (c = 0; c < rvd->vdev_children; c++) {
+		vdev_t *rebuild_vd = NULL;
+		vdev_t *cvd = rvd->vdev_child[c];
+
+		if (cvd->vdev_ops == &vdev_draid_ops)
+			rebuild_vd = vdev_draid_rebuild_needed(cvd);
+
+		if (rebuild_vd != NULL)
+			return (rebuild_vd);
+	}
+
+	return (NULL);
 }
 
 void
