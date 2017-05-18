@@ -69,7 +69,6 @@ extern boolean_t vdev_draid_is_dead(vdev_t *, uint64_t);
 extern boolean_t vdev_draid_missing(vdev_t *, uint64_t, uint64_t, uint64_t);
 extern vdev_t *vdev_draid_spare_get_parent(vdev_t *);
 extern nvlist_t *vdev_draid_spare_read_config(vdev_t *);
-extern vdev_t *vdev_draid_rebuild_needed(vdev_t *);
 
 #define	VDEV_DRAID_MAX_CHILDREN	255
 #define	VDEV_DRAID_U8_MAX	((uint8_t)-1)

@@ -2545,25 +2545,6 @@ vdev_resilver_needed(vdev_t *vd, uint64_t *minp, uint64_t *maxp)
 	return (needed);
 }
 
-vdev_t *
-vdev_rebuild_needed(vdev_t *rvd)
-{
-	int c;
-
-	for (c = 0; c < rvd->vdev_children; c++) {
-		vdev_t *rebuild_vd = NULL;
-		vdev_t *cvd = rvd->vdev_child[c];
-
-		if (cvd->vdev_ops == &vdev_draid_ops)
-			rebuild_vd = vdev_draid_rebuild_needed(cvd);
-
-		if (rebuild_vd != NULL)
-			return (rebuild_vd);
-	}
-
-	return (NULL);
-}
-
 void
 vdev_load(vdev_t *vd)
 {
@@ -3536,8 +3517,7 @@ vdev_stat_update(zio_t *zio, uint64_t psize)
 	if (type == ZIO_TYPE_WRITE && vd->vdev_ops != &vdev_draid_spare_ops &&
 	    txg != 0 &&
 	    (!(flags & ZIO_FLAG_IO_REPAIR) ||
-	    ((flags & ZIO_FLAG_SCAN_THREAD) &&
-	    !spa->spa_dsl_pool->dp_scan->scn_is_sequential) ||
+	    ((flags & ZIO_FLAG_SCAN_THREAD) && spa->spa_vdev_scan == NULL) ||
 	    spa->spa_claiming)) {
 		/*
 		 * This is either a normal write (not a repair), or it's

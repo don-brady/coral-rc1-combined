@@ -312,18 +312,22 @@ dsl_scan_done(dsl_scan_t *scn, boolean_t complete, dmu_tx_t *tx)
 
 	dsl_pool_t *dp = scn->scn_dp;
 	spa_t *spa = dp->dp_spa;
-	int i;
+	boolean_t rebuild = DSL_SCAN_IS_REBUILD(scn);
 
-	/* Remove any remnants of an old-style scrub. */
-	for (i = 0; old_names[i]; i++) {
-		(void) zap_remove(dp->dp_meta_objset,
-		    DMU_POOL_DIRECTORY_OBJECT, old_names[i], tx);
-	}
+	if (!rebuild) {
+		int i;
 
-	if (scn->scn_phys.scn_queue_obj != 0) {
-		VERIFY(0 == dmu_object_free(dp->dp_meta_objset,
-		    scn->scn_phys.scn_queue_obj, tx));
-		scn->scn_phys.scn_queue_obj = 0;
+		/* Remove any remnants of an old-style scrub. */
+		for (i = 0; old_names[i]; i++) {
+			(void) zap_remove(dp->dp_meta_objset,
+			    DMU_POOL_DIRECTORY_OBJECT, old_names[i], tx);
+		}
+
+		if (scn->scn_phys.scn_queue_obj != 0) {
+			VERIFY(0 == dmu_object_free(dp->dp_meta_objset,
+			    scn->scn_phys.scn_queue_obj, tx));
+			scn->scn_phys.scn_queue_obj = 0;
+		}
 	}
 
 	/*
@@ -348,7 +352,7 @@ dsl_scan_done(dsl_scan_t *scn, boolean_t complete, dmu_tx_t *tx)
 		spa_history_log_internal(spa, "scan done", tx,
 		    "errors=%llu", spa_get_errlog_size(spa));
 
-	if (DSL_SCAN_IS_SCRUB_RESILVER(scn) || DSL_SCAN_IS_REBUILD(scn)) {
+	if (DSL_SCAN_IS_SCRUB_RESILVER(scn) || rebuild) {
 		mutex_enter(&spa->spa_scrub_lock);
 		while (spa->spa_scrub_inflight > 0) {
 			cv_wait(&spa->spa_scrub_io_cv,
@@ -1546,7 +1550,7 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 		pool_scan_func_t func = POOL_SCAN_SCRUB;
 		dsl_scan_done(scn, B_FALSE, tx);
 		if (vdev_resilver_needed(spa->spa_root_vdev, NULL, NULL)) {
-			if (scn->scn_is_sequential)
+			if (spa->spa_vdev_scan != NULL)
 				func = POOL_SCAN_REBUILD;
 			else
 				func = POOL_SCAN_RESILVER;
@@ -1578,7 +1582,6 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 	 */
 	if (!scn->scn_async_stalled && !dsl_scan_active(scn))
 		return;
-
 
 	scn->scn_visited_this_txg = 0;
 	scn->scn_pausing = B_FALSE;
@@ -1704,26 +1707,34 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 
 	if (DSL_SCAN_IS_REBUILD(scn)) {
 		spa_vdev_scan_t *svs = spa->spa_vdev_scan;
+		int msi;
 		boolean_t done;
 
 		ASSERT(svs != NULL);
-		ASSERT(scn->scn_is_sequential);
 
 		mutex_enter(&svs->svs_lock);
 		done = (svs->svs_thread == NULL) ? B_TRUE : B_FALSE;
+		msi = svs->svs_msi_synced;
 		mutex_exit(&svs->svs_lock);
 
 		if (done) {
 			boolean_t complete = !svs->svs_thread_exit;
 
+			if (complete) {
+				ASSERT3U(msi + 1, ==,
+				    svs->svs_vd->vdev_top->vdev_ms_count);
+				SPA_VDEV_SCAN_MS(scn) = -1;
+				SPA_VDEV_SCAN_TVD(scn) = 0;
+				SPA_VDEV_SCAN_OLDVD(scn) = 0;
+			}
 			dsl_scan_done(scn, complete, tx);
 			dsl_scan_sync_state(scn, tx);
 
 			spa_vdev_scan_destroy(spa);
-			scn->scn_is_sequential = B_FALSE;
 			svs = NULL;
-		} else {
-			spa_vdev_scan_sync(spa, tx);
+		} else if (msi > SPA_VDEV_SCAN_MS(scn)) {
+			SPA_VDEV_SCAN_MS(scn) = msi;
+			dsl_scan_sync_state(scn, tx);
 		}
 		/* Rebuild is mostly handled in the open-context scan thread */
 		return;
@@ -1797,6 +1808,8 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 void
 dsl_resilver_restart(dsl_pool_t *dp, uint64_t txg)
 {
+	ASSERT3P(dp->dp_spa->spa_vdev_scan, ==, NULL);
+
 	if (txg == 0) {
 		dmu_tx_t *tx;
 		tx = dmu_tx_create_dd(dp->dp_mos_dir);
@@ -1808,7 +1821,6 @@ dsl_resilver_restart(dsl_pool_t *dp, uint64_t txg)
 	} else {
 		dp->dp_scan->scn_restart_txg = txg;
 	}
-	dp->dp_scan->scn_is_sequential = B_FALSE;
 	zfs_dbgmsg("restarting resilver txg=%llu", txg);
 }
 

@@ -3099,14 +3099,9 @@ spa_load_impl(spa_t *spa, uint64_t pool_guid, nvlist_t *config,
 		 * Check all DTLs to see if anything needs resilvering.
 		 */
 		if (!dsl_scan_resilvering(spa->spa_dsl_pool) &&
-		    vdev_resilver_needed(rvd, NULL, NULL)) {
-			vdev_t *dspare = vdev_rebuild_needed(rvd);
-
-			if (dspare == NULL)
-				spa_async_request(spa, SPA_ASYNC_RESILVER);
-			else
-				spa_vdev_scan_restart(dspare);
-		}
+		    vdev_resilver_needed(rvd, NULL, NULL) &&
+		    spa_vdev_scan_restart(rvd) != 0)
+			spa_async_request(spa, SPA_ASYNC_RESILVER);
 
 		/*
 		 * Log the fact that we booted up (so that we can detect if
@@ -5098,7 +5093,7 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 	    pvd->vdev_ops == &vdev_spare_ops &&
 	    vd->vdev_ops == &vdev_draid_spare_ops &&
 	    spa->spa_vdev_scan != NULL &&
-	    spa->spa_vdev_scan->svs_vdev->vdev_parent == pvd)
+	    spa->spa_vdev_scan->svs_vd->vdev_parent == pvd)
 		spa->spa_vdev_scan->svs_thread_exit = B_TRUE;
 
 	/*

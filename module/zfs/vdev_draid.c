@@ -1082,34 +1082,6 @@ vdev_draid_need_resilver(vdev_t *vd, uint64_t offset, size_t psize)
 	return (vdev_draid_group_degraded(vd, NULL, offset, psize, mirror));
 }
 
-vdev_t *
-vdev_draid_rebuild_needed(vdev_t *vd)
-{
-	int c;
-
-	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_ops);
-
-	for (c = 0; c < vd->vdev_children; c++) {
-		vdev_t *cvd = vd->vdev_child[c];
-		vdev_t *dspare;
-
-		if (cvd->vdev_ops != &vdev_spare_ops)
-			continue;
-
-		ASSERT3U(cvd->vdev_children, ==, 2);
-		dspare = cvd->vdev_child[1];
-
-		if (dspare->vdev_ops != &vdev_draid_spare_ops)
-			continue;
-
-		if (vdev_resilver_needed(dspare, NULL, NULL))
-			return (dspare);
-	}
-
-	return NULL;
-}
-
-
 /*
  * Start an IO operation on a dRAID VDev
  *

@@ -189,7 +189,7 @@ spa_vdev_scan_draid_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
 			spa_vdev_scan_rebuild(svs, pio, vd, offset, chunksz);
 		}
 
-		draid_dbg(1, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
+		draid_dbg(3, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
 		    action, offset >> 10, chunksz >> 10,
 		    mirror ? "mirrored" : "dRAID");
 
@@ -199,34 +199,99 @@ spa_vdev_scan_draid_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
 }
 
 static void
+spa_vdev_scan_ms_done(zio_t *zio)
+{
+	metaslab_t *msp = zio->io_private;
+	spa_vdev_scan_t *svs = zio->io_spa->spa_vdev_scan;
+	int *ms_done, msi;
+
+	ASSERT(msp != NULL);
+	ASSERT(svs != NULL);
+
+	mutex_enter(&msp->ms_lock);
+	msp->ms_rebuilding = B_FALSE;
+	mutex_exit(&msp->ms_lock);
+
+	ms_done = svs->svs_ms_done;
+	ASSERT(ms_done != NULL);
+	ASSERT0(ms_done[msp->ms_id]);
+
+	mutex_enter(&svs->svs_lock);
+
+	if (svs->svs_thread_exit) {
+		/* Cannot mark this MS as "done", because the rebuild thread
+		 * may have been interrupted in the middle of working on
+		 * this MS.
+		 */
+		mutex_exit(&svs->svs_lock);
+		draid_dbg(1, "Aborted rebuilding metaslab "U64FMT"\n", msp->ms_id);
+		return;
+	}
+
+	ms_done[msp->ms_id] = 1;
+
+	for (msi = svs->svs_msi_synced + 1;
+	    msi < svs->svs_vd->vdev_top->vdev_ms_count; msi++) {
+		if (ms_done[msi] == 0)
+			break;
+	}
+	svs->svs_msi_synced = msi - 1;
+
+	mutex_exit(&svs->svs_lock);
+
+	draid_dbg(1, "Completed rebuilding metaslab "U64FMT"\n", msp->ms_id);
+	draid_dbg(1, "All metaslabs [0, %d) fully rebuilt.\n", msi)
+}
+
+static void
 spa_vdev_scan_thread(void *arg)
 {
 	vdev_t *vd = arg;
 	spa_t *spa = vd->vdev_spa;
 	spa_vdev_scan_t *svs = spa->spa_vdev_scan;
-	zio_t *pio = zio_root(spa, NULL, NULL, 0);
+	zio_t *rio = zio_root(spa, NULL, NULL, 0);
 	range_tree_t *allocd_segs;
+	kmutex_t lock;
 	uint64_t msi;
-	int err;
+	int *ms_done, err;
 
 	ASSERT(svs != NULL);
-	ASSERT3P(svs->svs_vdev, ==, vd);
+	ASSERT3P(svs->svs_vd, ==, vd);
+	ASSERT3P(svs->svs_ms_done, ==, NULL);
 
 	vd = vd->vdev_top;
+	ASSERT3U(svs->svs_msi, >=, 0);
 	ASSERT3U(svs->svs_msi, <, vd->vdev_ms_count);
+
 	/*
 	 * Wait for newvd's DTL to propagate upward when
 	 * spa_vdev_attach()->spa_vdev_exit() calls vdev_dtl_reassess().
 	 */
 	txg_wait_synced(spa->spa_dsl_pool, svs->svs_dtl_max);
-	allocd_segs = range_tree_create(NULL, NULL, &svs->svs_lock);
+
+	mutex_init(&lock, NULL, MUTEX_DEFAULT, NULL);
+	allocd_segs = range_tree_create(NULL, NULL, &lock);
+
+	ms_done = kmem_alloc(sizeof (*ms_done) * vd->vdev_ms_count, KM_SLEEP);
+	for (msi = 0; msi < vd->vdev_ms_count; msi++) {
+		if (msi < svs->svs_msi)
+			ms_done[msi] = 1;
+		else
+			ms_done[msi] = 0;
+	}
 
 	mutex_enter(&svs->svs_lock);
+	svs->svs_ms_done = ms_done;
+	svs->svs_msi_synced = svs->svs_msi - 1;
+	mutex_exit(&svs->svs_lock);
 
 	for (msi = svs->svs_msi;
 	    msi < vd->vdev_ms_count && !svs->svs_thread_exit; msi++) {
 		metaslab_t *msp = vd->vdev_ms[msi];
+		zio_t *pio = zio_null(rio, spa, NULL,
+		    spa_vdev_scan_ms_done, msp, rio->io_flags);
 
+		mutex_enter(&lock);
 		ASSERT0(range_tree_space(allocd_segs));
 
 		mutex_enter(&msp->ms_sync_lock);
@@ -264,13 +329,13 @@ spa_vdev_scan_thread(void *arg)
 			 *
 			 * Note: space_map_open() drops and reacquires the
 			 * caller-provided lock.  Therefore we can not provide
-			 * any lock that we are using (e.g. ms_lock, svr_lock).
+			 * any lock that we are using (e.g. ms_lock, svs_lock).
 			 */
 			VERIFY0(space_map_open(&sm,
 			    spa->spa_dsl_pool->dp_meta_objset,
 			    msp->ms_sm->sm_object, msp->ms_sm->sm_start,
 			    msp->ms_sm->sm_size, msp->ms_sm->sm_shift,
-			    &svs->svs_lock));
+			    &lock));
 			space_map_update(sm);
 			VERIFY0(space_map_load(sm, allocd_segs, SM_ALLOC));
 			space_map_close(sm);
@@ -278,7 +343,7 @@ spa_vdev_scan_thread(void *arg)
 		mutex_exit(&msp->ms_lock);
 		mutex_exit(&msp->ms_sync_lock);
 
-		zfs_dbgmsg("Scanning %llu segments for metaslab %llu",
+		draid_dbg(1, "Scanning %lu segments for MS "U64FMT"\n",
 		    avl_numnodes(&allocd_segs->rt_root), msp->ms_id);
 
 		while (!svs->svs_thread_exit &&
@@ -291,9 +356,9 @@ spa_vdev_scan_thread(void *arg)
 			length = rs->rs_end - rs->rs_start;
 
 			range_tree_remove(allocd_segs, offset, length);
-			mutex_exit(&svs->svs_lock);
+			mutex_exit(&lock);
 
-			draid_dbg(1, "MS ("U64FMT" at "U64FMT"K) segment: "
+			draid_dbg(2, "MS ("U64FMT" at "U64FMT"K) segment: "
 			    U64FMT"K + "U64FMT"K\n",
 			    msp->ms_id, msp->ms_start >> 10,
 			    (offset - msp->ms_start) >> 10, length >> 10);
@@ -303,44 +368,40 @@ spa_vdev_scan_thread(void *arg)
 				    vd, offset, length);
 			else
 				spa_vdev_scan_draid_rebuild(svs, pio, vd,
-				    svs->svs_vdev, offset, length);
+				    svs->svs_vd, offset, length);
 
-			mutex_enter(&svs->svs_lock);
+			mutex_enter(&lock);
 		}
 
-		mutex_enter(&msp->ms_lock);
-
-		/* HH: wait for rebuild IOs to complete for this metaslab? */
-		msp->ms_rebuilding = B_FALSE;
-
-		mutex_exit(&msp->ms_lock);
+		mutex_exit(&lock);
+		zio_nowait(pio);
 	}
 
-	mutex_exit(&svs->svs_lock);
-
-	err = zio_wait(pio);
+	err = zio_wait(rio);
 	if (err != 0) /* HH: handle error */
 		err = SET_ERROR(err);
 
+	mutex_enter(&svs->svs_lock);
 	if (svs->svs_thread_exit) {
-		mutex_enter(&svs->svs_lock);
+		mutex_enter(&lock);
 		range_tree_vacate(allocd_segs, NULL, NULL);
-		mutex_exit(&svs->svs_lock);
+		mutex_exit(&lock);
 	}
 
-	ASSERT0(range_tree_space(allocd_segs));
-	range_tree_destroy(allocd_segs);
-
-	mutex_enter(&svs->svs_lock);
 	svs->svs_thread = NULL;
+	svs->svs_ms_done = NULL;
 	cv_broadcast(&svs->svs_cv);
 	mutex_exit(&svs->svs_lock);
 
+	ASSERT0(range_tree_space(allocd_segs));
+	range_tree_destroy(allocd_segs);
+	mutex_destroy(&lock);
+	kmem_free(ms_done, sizeof (*ms_done) * vd->vdev_ms_count);
 	thread_exit();
 }
 
 void
-spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t msi, uint64_t txg)
+spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, int msi, uint64_t txg)
 {
 	dsl_scan_t *scan = spa->spa_dsl_pool->dp_scan;
 	spa_vdev_scan_t *svs = kmem_zalloc(sizeof (*svs), KM_SLEEP);
@@ -348,8 +409,10 @@ spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t msi, uint64_t txg)
 	ASSERT3U(msi, <, oldvd->vdev_top->vdev_ms_count);
 
 	svs->svs_msi = msi;
-	svs->svs_vdev = oldvd;
+	svs->svs_vd = oldvd;
 	svs->svs_dtl_max = txg;
+	svs->svs_thread = NULL;
+	svs->svs_ms_done = NULL;
 	mutex_init(&svs->svs_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&svs->svs_cv, NULL, CV_DEFAULT, NULL);
 	ASSERT3P(spa->spa_vdev_scan, ==, NULL);
@@ -357,26 +420,50 @@ spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, uint64_t msi, uint64_t txg)
 	svs->svs_thread = thread_create(NULL, 0, spa_vdev_scan_thread, oldvd,
 	    0, NULL, TS_RUN, defclsyspri);
 
-	scan->scn_is_sequential = B_TRUE;
 	scan->scn_restart_txg = txg;
 }
 
-void
-spa_vdev_scan_restart(vdev_t *vd)
+int
+spa_vdev_scan_restart(vdev_t *rvd)
 {
-	spa_t *spa = vd->vdev_spa;
-	vdev_t *pvd = vd->vdev_parent;
+	spa_t *spa = rvd->vdev_spa;
+	dsl_scan_t *scn = spa->spa_dsl_pool->dp_scan;
+	vdev_t *tvd, *oldvd, *pvd, *dspare;
 
-	ASSERT(pvd != NULL);
-	ASSERT3U(pvd->vdev_children, ==, 2);
-	ASSERT3P(pvd->vdev_ops, ==, &vdev_spare_ops);
-	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_spare_ops);
+	ASSERT(scn != NULL);
+	ASSERT3P(spa->spa_vdev_scan, ==, NULL);
 
-	if (spa->spa_vdev_scan != NULL)
-		return;
+	if (!DSL_SCAN_IS_REBUILD(scn) ||
+	    scn->scn_phys.scn_state == DSS_FINISHED ||
+	    SPA_VDEV_SCAN_TVD(scn) == 0 || SPA_VDEV_SCAN_OLDVD(scn) == 0 ||
+	    SPA_VDEV_SCAN_MS(scn) < -1)
+		return (SET_ERROR(ENOENT));
 
-	spa_vdev_scan_start(spa, pvd->vdev_child[0], 0,
+	tvd = vdev_lookup_by_guid(rvd, SPA_VDEV_SCAN_TVD(scn));
+	oldvd = vdev_lookup_by_guid(rvd, SPA_VDEV_SCAN_OLDVD(scn));
+	if (tvd == NULL || oldvd == NULL || oldvd->vdev_top != tvd)
+		return (SET_ERROR(ENOENT));
+
+	if (tvd->vdev_ops != &vdev_draid_ops)
+		return (SET_ERROR(ENOTSUP));
+
+	if (SPA_VDEV_SCAN_MS(scn) >= tvd->vdev_ms_count - 1)
+		return (SET_ERROR(ENOENT));
+
+	pvd = oldvd->vdev_parent;
+	if (pvd->vdev_ops != &vdev_spare_ops || pvd->vdev_children != 2)
+		return (SET_ERROR(ENOENT));
+
+	dspare = pvd->vdev_child[1];
+	if (dspare->vdev_ops != &vdev_draid_spare_ops ||
+	    !vdev_resilver_needed(dspare, NULL, NULL))
+		return (SET_ERROR(ENOENT));
+
+	draid_dbg(1, "Restarting rebuild at metaslab "U64FMT"\n",
+	    SPA_VDEV_SCAN_MS(scn) + 1);
+	spa_vdev_scan_start(spa, oldvd, SPA_VDEV_SCAN_MS(scn) + 1,
 	    spa_last_synced_txg(spa) + 1 + TXG_CONCURRENT_STATES);
+	return (0);
 }
 
 void
@@ -384,11 +471,12 @@ spa_vdev_scan_setup_sync(dmu_tx_t *tx)
 {
 	dsl_scan_t *scn = dmu_tx_pool(tx)->dp_scan;
 	spa_t *spa = scn->scn_dp->dp_spa;
+	vdev_t *oldvd;
 
-	ASSERT(scn->scn_is_sequential);
 	ASSERT(scn->scn_phys.scn_state != DSS_SCANNING);
 	ASSERT(spa->spa_vdev_scan != NULL);
 
+	oldvd = spa->spa_vdev_scan->svs_vd;
 	bzero(&scn->scn_phys, sizeof (scn->scn_phys));
 	scn->scn_phys.scn_func = POOL_SCAN_REBUILD;
 	scn->scn_phys.scn_state = DSS_SCANNING;
@@ -398,16 +486,18 @@ spa_vdev_scan_setup_sync(dmu_tx_t *tx)
 	scn->scn_phys.scn_start_time = gethrestime_sec();
 	scn->scn_phys.scn_errors = 0;
 	/* Rebuild only examines blocks on one vdev */
-	scn->scn_phys.scn_to_examine =
-	    spa->spa_vdev_scan->svs_vdev->vdev_top->vdev_stat.vs_alloc;
+	scn->scn_phys.scn_to_examine = oldvd->vdev_top->vdev_stat.vs_alloc;
+	SPA_VDEV_SCAN_MS(scn) = -1;
+	SPA_VDEV_SCAN_TVD(scn) = oldvd->vdev_top->vdev_guid;
+	SPA_VDEV_SCAN_OLDVD(scn) = oldvd->vdev_guid;
+
 	scn->scn_restart_txg = 0;
 	scn->scn_done_txg = 0;
-
 	scn->scn_sync_start_time = gethrtime();
 	scn->scn_pausing = B_FALSE;
+
 	spa->spa_scrub_active = B_TRUE;
 	spa_scan_stat_init(spa);
-
 	spa->spa_scrub_started = B_TRUE;
 	spa_event_notify(spa, NULL, ESC_ZFS_REBUILD_START);
 }
@@ -438,15 +528,13 @@ spa_vdev_scan_destroy(spa_t *spa)
 	if (svs == NULL)
 		return;
 
+	ASSERT3P(svs->svs_thread, ==, NULL);
+	ASSERT3P(svs->svs_ms_done, ==, NULL);
+
 	spa->spa_vdev_scan = NULL;
 	mutex_destroy(&svs->svs_lock);
 	cv_destroy(&svs->svs_cv);
 	kmem_free(svs, sizeof (*svs));
-}
-
-void
-spa_vdev_scan_sync(spa_t *spa, dmu_tx_t *tx)
-{
 }
 
 void

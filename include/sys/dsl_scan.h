@@ -118,7 +118,6 @@ typedef struct dsl_scan {
 	boolean_t scn_async_destroying;
 	boolean_t scn_async_stalled;
 
-	boolean_t scn_is_sequential; /* sequential rebuild? */
 	/* for debugging / information */
 	uint64_t scn_visited_this_txg;
 
