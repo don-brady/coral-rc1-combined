@@ -2310,8 +2310,7 @@ zio_write_gang_block(zio_t *pio)
 	int g, error;
 	int flags = METASLAB_HINTBP_FAVOR | METASLAB_GANG_HEADER;
 
-	mc = spa_preferred_class(spa, SPA_GANGBLOCKSIZE, BP_GET_TYPE(bp), 0,
-	    gio->io_bookmark.zb_objset);
+	mc = spa_preferred_class(spa, SPA_GANGBLOCKSIZE, BP_GET_TYPE(bp), 0);
 
 	if (pio->io_flags & ZIO_FLAG_IO_ALLOCATING) {
 		ASSERT(pio->io_priority == ZIO_PRIORITY_ASYNC_WRITE);
@@ -3045,8 +3044,7 @@ zio_dva_allocate(zio_t *zio)
 
 	/* locate an appropriate allocation class */
 	mc = spa_preferred_class(spa, zio->io_size, zio->io_prop.zp_type,
-	    zio->io_prop.zp_level, zio->io_prop.zp_copies == 3 ?
-	    DMU_META_OBJSET : zio->io_bookmark.zb_objset);
+	    zio->io_prop.zp_level);
 
 	error = metaslab_alloc(spa, mc, zio->io_size, bp,
 	    zio->io_prop.zp_copies, zio->io_txg, NULL, flags,

@@ -25,7 +25,6 @@
 
 /*
  * Copyright (c) 2012, 2014 by Delphix. All rights reserved.
- * Copyright (c) 2017, Intel Corporation.
  */
 
 #ifndef _SYS_SPACE_MAP_H
@@ -59,15 +58,7 @@ typedef struct space_map_phys {
 	uint64_t	smp_object;	/* on-disk space map object */
 	uint64_t	smp_objsize;	/* size of the object */
 	uint64_t	smp_alloc;	/* space allocated from the map */
-
-	/* More detailed allocation info */
-	struct sm_alloc_info {
-		uint64_t	enabled_birth;	/* valid after this txg */
-		uint64_t	dedup_alloc;	/* dedup blocks allocated */
-		uint64_t	metadata_alloc;	/* metadata blocks allocated */
-		uint64_t	smallblks_alloc; /* small blocks allocated */
-		uint64_t	alloc_bias;	/* metaslab's segregated bias */
-	} smp_alloc_info;
+	uint64_t	smp_pad[5];	/* reserved */
 
 	/*
 	 * The smp_histogram maintains a histogram of free regions. Each
@@ -142,16 +133,6 @@ typedef enum {
 	SM_FREE
 } maptype_t;
 
-/*
- * Optional metaslab class allocation bias (segregated vdevs only)
- */
-typedef enum {
-	SM_ALLOC_BIAS_DEFAULT =		0x0ULL,
-	SM_ALLOC_BIAS_METADATA =	0xa110cc1a55da7aULL,
-	SM_ALLOC_BIAS_LOG =		0xa110cc1a551065ULL,
-	SM_ALLOC_BIAS_SMALLBLKS =	0xa110cc1a55b10cULL
-} map_alloc_bias_t;
-
 int space_map_load(space_map_t *sm, range_tree_t *rt, maptype_t maptype);
 
 void space_map_histogram_clear(space_map_t *sm);
@@ -175,11 +156,6 @@ int space_map_open(space_map_t **smp, objset_t *os, uint64_t object,
 void space_map_close(space_map_t *sm);
 
 int64_t space_map_alloc_delta(space_map_t *sm);
-
-void space_map_sync_block_allocations(space_map_t *sm, int64_t dedup_delta,
-    int64_t metadata_delta, int64_t smallblks_delta);
-map_alloc_bias_t space_map_get_alloc_bias(space_map_t *sm);
-void space_map_set_alloc_bias(space_map_t *sm, map_alloc_bias_t bias);
 
 #ifdef	__cplusplus
 }

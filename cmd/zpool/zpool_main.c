@@ -4571,7 +4571,7 @@ typedef struct list_cbdata {
 	boolean_t	cb_category;
 } list_cbdata_t;
 
-#define	CATEGORY_NAME_WIDTH	12
+#define	CATEGORY_NAME_WIDTH	14
 
 
 /*
@@ -4588,16 +4588,17 @@ print_header(list_cbdata_t *cb)
 	size_t width = 0;
 
 	if (cb->cb_category) {
-		const char *line = "-----  -----  -----";
-		const char *column = "SPACE  ALLOC  USING";
+		const char *fmt;
 
-		(void) printf("\n%*s  %19s  %19s  %19s\n", CATEGORY_NAME_WIDTH,
-		    "", "Generic Blocks  ", "Small Blocks   ",
-		    "Metadata Blocks  ");
-		(void) printf("%-*s  %s  %s  %s\n", CATEGORY_NAME_WIDTH,
-		    "NAME", column, column, column);
-		(void) printf("%-*s  %s  %s  %s\n", CATEGORY_NAME_WIDTH,
-		    "------------", line, line, line);
+		(void) printf("%-*s  ", CATEGORY_NAME_WIDTH, "NAME");
+		if (cb->cb_literal)
+			fmt = "%-11s  %-11s  %-11s  %-11s\n";
+		else
+			fmt = "%-5s  %-5s  %-5s  %-8s\n";
+		(void) printf(fmt, "SIZE", "ALLOC", "FREE", "CAPACITY");
+		(void) printf("%-*s  ", CATEGORY_NAME_WIDTH, "--------------");
+		(void) printf(fmt, "-----", "-----", "-----", "--------");
+
 		return;
 	}
 
@@ -4892,15 +4893,20 @@ print_category_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 	vdev_stat_t *vs;
 	uint_t c, children;
 	boolean_t scripted = cb->cb_scripted;
+	char *bias = NULL, *type = "";
 
 	if (nvlist_lookup_uint64_array(nv, ZPOOL_CONFIG_VDEV_STATS,
-	    (uint64_t **)&vs, &c) != 0 ||
-	    (vs->vs_space_metadata == 0 && vs->vs_space_smallblks == 0))
+	    (uint64_t **)&vs, &c) != 0)
 		return;
 
-	if (name != NULL && vs->vs_space != 0) {
-		uint64_t cap, gen_alloc, gen_space;
+	(void) nvlist_lookup_string(nv, ZPOOL_CONFIG_ALLOCATION_BIAS, &bias);
+	(void) nvlist_lookup_string(nv, ZPOOL_CONFIG_TYPE, &type);
+
+	if (name != NULL &&
+	    (bias != NULL || strcmp(type, VDEV_TYPE_ROOT) == 0)) {
+		uint64_t space, alloc, capacity;
 		enum zfs_nicenum_format format;
+		boolean_t virtual, hascap = B_TRUE;
 
 		if (cb->cb_literal)
 			format = ZFS_NICENUM_RAW;
@@ -4915,40 +4921,48 @@ print_category_stats(zpool_handle_t *zhp, const char *name, nvlist_t *nv,
 			(void) printf("%*s%s%*s", depth, "", name,
 			    (int)(cb->cb_namewidth - strlen(name) - depth), "");
 
-		/* Print Generic Category */
-		gen_alloc = vs->vs_alloc - vs->vs_alloc_metadata -
-		    vs->vs_alloc_smallblks;
-		gen_space = vs->vs_space - vs->vs_space_metadata -
-		    vs->vs_space_smallblks;
-		print_one_column(ZPOOL_PROP_SIZE, gen_space, scripted, B_TRUE,
+		if (strcmp(name, "normal") == 0) {
+			space = vs->vs_normal_assigned;
+			alloc = vs->vs_alloc - vs->vs_special_alloc;
+			virtual = B_TRUE;
+		} else if (strcmp(name, "special") == 0) {
+			space = vs->vs_special_assigned;
+			alloc = vs->vs_special_alloc;
+			virtual = B_TRUE;
+		} else if (strcmp(name, "unassigned") == 0) {
+			space = vs->vs_space - vs->vs_normal_assigned -
+			    vs->vs_special_assigned;
+			alloc = 0;
+			virtual = B_TRUE;
+			hascap = B_FALSE;
+		} else {
+			space = vs->vs_space;
+			alloc = vs->vs_alloc;
+			virtual = B_FALSE;
+		}
+
+		print_one_column(ZPOOL_PROP_SIZE, space, scripted, B_TRUE,
 		    format);
-		print_one_column(ZPOOL_PROP_ALLOCATED, gen_alloc, scripted,
+
+		print_one_column(ZPOOL_PROP_ALLOCATED, alloc, scripted, B_TRUE,
+		    format);
+		print_one_column(ZPOOL_PROP_FREE, space - alloc, scripted,
 		    B_TRUE, format);
-		cap = (gen_space == 0) ? 0 : (gen_alloc * 10000 / gen_space);
-		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
-		    format);
-
-		/* Print Small Block Category */
-		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_smallblks,
-		    scripted, B_TRUE, format);
-		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_smallblks,
-		    scripted, B_TRUE, format);
-		cap = (vs->vs_space_smallblks == 0) ? 0 :
-		    (vs->vs_alloc_smallblks * 10000 / vs->vs_space_smallblks);
-		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
-		    format);
-
-		/* Print Metadata Category */
-		print_one_column(ZPOOL_PROP_SIZE, vs->vs_space_metadata,
-		    scripted, B_TRUE, format);
-		print_one_column(ZPOOL_PROP_ALLOCATED, vs->vs_alloc_metadata,
-		    scripted, B_TRUE, format);
-		cap = (vs->vs_space_metadata == 0) ? 0 :
-		    (vs->vs_alloc_metadata * 10000 / vs->vs_space_metadata);
-		print_one_column(ZPOOL_PROP_CAPACITY, cap, scripted, B_TRUE,
-		    format);
-
+		capacity = (space == 0) ? 0 : (alloc * 10000 / space);
+		print_one_column(ZPOOL_PROP_CAPACITY, capacity, scripted,
+		    hascap, ZFS_NICENUM_1024);
 		(void) printf("\n");
+
+		char *bias;
+		if (!virtual &&
+		    nvlist_lookup_string(nv, ZPOOL_CONFIG_ALLOCATION_BIAS,
+		    &bias) == 0 &&
+		    strcmp(bias, VDEV_ALLOC_BIAS_SEGREGATE) == 0) {
+			print_category_stats(zhp, "normal", nv, cb, depth + 2);
+			print_category_stats(zhp, "special", nv, cb, depth + 2);
+			print_category_stats(zhp, "unassigned", nv, cb,
+			    depth + 2);
+		}
 	}
 
 	if (nvlist_lookup_nvlist_array(nv, ZPOOL_CONFIG_CHILDREN,

@@ -3106,19 +3106,13 @@ ztest_vdev_add_remove(ztest_ds_t *zd, uint64_t id)
 	mutex_exit(&ztest_vdev_lock);
 }
 
-static const char *vdev_alloc_classes[] = {
-	"dedup",
-	"metadata",
-	"smallblks"
-};
-
 /* ARGSUSED */
 void
 ztest_vdev_class_add(ztest_ds_t *zd, uint64_t id)
 {
 	ztest_shared_t *zs = ztest_shared;
 	spa_t *spa = ztest_spa;
-	const char *class;
+	const char *class = VDEV_ALLOC_BIAS_SPECIAL;
 	uint64_t leaves;
 	nvlist_t *nvroot;
 	int error;
@@ -3146,11 +3140,11 @@ ztest_vdev_class_add(ztest_ds_t *zd, uint64_t id)
 		return;
 	}
 
-	/* When pool is using segregated VDEVs only choice is dedup */
-	if (spa->spa_segregate_metadata || spa->spa_segregate_smallblks)
-		class = vdev_alloc_classes[0];
-	else
-		class = vdev_alloc_classes[ztest_random(3)];
+	/* Skip when pool is using segregated VDEVs */
+	if (spa->spa_segregate_special) {
+		mutex_exit(&ztest_vdev_lock);
+		return;
+	}
 
 	leaves = MAX(zs->zs_mirrors + zs->zs_splits, 1) *
 	    ztest_opts.zo_raid_children;
@@ -6925,10 +6919,9 @@ make_random_props(void)
 		if ((ztest_opts.zo_segregated_vdevs == ZTEST_VDEV_CLASS_ON) ||
 		    (ztest_opts.zo_segregated_vdevs == ZTEST_VDEV_CLASS_RND &&
 		    ztest_random(3) != 0)) {
-			fnvlist_add_uint64(props, "segregate_metadata", 1);
-			fnvlist_add_uint64(props, "segregate_smallblks", 1);
+			fnvlist_add_uint64(props, "segregate_special", 1);
 			if (ztest_opts.zo_verbose >= 3)
-				(void) printf("Adding segregate props to dRAID "
+				(void) printf("Adding segregate prop to dRAID "
 				    "pool '%s'\n", ztest_opts.zo_pool);
 		}
 	} else if (ztest_opts.zo_vdev_size >= SEGREGATE_MINDEVSIZE &&
@@ -6940,8 +6933,7 @@ make_random_props(void)
 		    (ztest_opts.zo_segregated_vdevs == ZTEST_VDEV_CLASS_RND &&
 		    ztest_random(5) == 0)) {
 			fnvlist_add_uint64(props, "segregate_log", 1);
-			fnvlist_add_uint64(props, "segregate_metadata", 1);
-			fnvlist_add_uint64(props, "segregate_smallblks", 1);
+			fnvlist_add_uint64(props, "segregate_special", 1);
 
 			if (ztest_opts.zo_verbose >= 3)
 				(void) printf("Adding segregate props to pool "

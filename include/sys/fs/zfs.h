@@ -222,8 +222,7 @@ typedef enum {
 	ZPOOL_PROP_TNAME,
 	ZPOOL_PROP_MAXDNODESIZE,
 	ZPOOL_PROP_SEGREGATE_LOG,
-	ZPOOL_PROP_SEGREGATE_METADATA,
-	ZPOOL_PROP_SEGREGATE_SMALLBLKS,
+	ZPOOL_PROP_SEGREGATE_SPECIAL,
 	ZPOOL_NUM_PROPS
 } zpool_prop_t;
 
@@ -696,14 +695,16 @@ typedef struct zpool_rewind_policy {
 
 /* vdev metaslab allocation bias */
 #define	VDEV_ALLOC_BIAS_LOG		"log"
-#define	VDEV_ALLOC_BIAS_DEDUP		"dedup"
-#define	VDEV_ALLOC_BIAS_METADATA	"metadata"
-#define	VDEV_ALLOC_BIAS_SMALLBLKS	"smallblks"
+#define	VDEV_ALLOC_BIAS_SPECIAL		"special"
 #define	VDEV_ALLOC_BIAS_SEGREGATE	"segregate"
 
 /* VDEV_TOP_ZAP_* are used in top-level vdev ZAP objects. */
 #define	VDEV_TOP_ZAP_ALLOCATION_BIAS \
 	"com.intel:allocation_bias"
+#define	VDEV_TOP_ZAP_ALLOCATION_BIRTH \
+	"com.intel:allocation_birth"
+#define	VDEV_TOP_ZAP_METASLAB_INFO_OBJ \
+	"com.intel:metaslab_info_obj"
 
 /*
  * This is needed in userland to report the minimum necessary device size.
@@ -868,11 +869,10 @@ typedef struct vdev_stat {
 	uint64_t	vs_scan_removing;	/* removing?	*/
 	uint64_t	vs_scan_processed;	/* scan processed bytes	*/
 	uint64_t	vs_fragmentation;	/* device fragmentation */
-	uint64_t	vs_alloc_metadata;	/* metadata allocated	*/
-	uint64_t	vs_space_metadata;	/* metadata capacity	*/
-	uint64_t	vs_alloc_smallblks;	/* small blks allocated */
-	uint64_t	vs_space_smallblks;	/* small blks capacity	*/
-	uint64_t	vs_calloc_smallblks;	/* allocated from class	*/
+
+	uint64_t	vs_normal_assigned;	/* ms assigned space	*/
+	uint64_t	vs_special_assigned;	/* ms assigned space	*/
+	uint64_t	vs_special_alloc;	/* special allocated	*/
 } vdev_stat_t;
 
 /*

@@ -22,7 +22,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2013, 2015 by Delphix. All rights reserved.
- * Copyright (c) 2016 Intel Corporation.
+ * Copyright (c) 2017 Intel Corporation.
  * Copyright 2016 Igor Kozhukhov <ikozhukhov@gmail.com>.
  */
 
@@ -1472,9 +1472,7 @@ is_grouping(const char *type, int *mindev, int *maxdev)
 		return (VDEV_TYPE_LOG);
 	}
 
-	if (strcmp(type, VDEV_ALLOC_BIAS_DEDUP) == 0 ||
-	    strcmp(type, VDEV_ALLOC_BIAS_METADATA) == 0 ||
-	    strcmp(type, VDEV_ALLOC_BIAS_SMALLBLKS) == 0) {
+	if (strcmp(type, VDEV_ALLOC_BIAS_SPECIAL) == 0) {
 		if (mindev != NULL)
 			*mindev = 2;
 		return (type);
@@ -1514,7 +1512,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 	nvlist_t *nvroot, *nv, **top, **spares, **l2cache;
 	int t, toplevels, mindev, maxdev, nspares, nlogs, nl2cache;
 	const char *type;
-	uint64_t is_log, is_dedup, is_metadata, is_smallblks;
+	uint64_t is_log, is_special;
 	boolean_t seen_logs;
 
 	top = NULL;
@@ -1524,7 +1522,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 	nspares = 0;
 	nlogs = 0;
 	nl2cache = 0;
-	is_log = is_dedup = is_metadata = is_smallblks = B_FALSE;
+	is_log = is_special = B_FALSE;
 	seen_logs = B_FALSE;
 	nvroot = NULL;
 
@@ -1548,8 +1546,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 					    "specified only once\n"));
 					goto spec_out;
 				}
-				is_log = is_dedup = B_FALSE;
-				is_metadata = is_smallblks = B_FALSE;
+				is_log = is_special = B_FALSE;
 			}
 
 			if (strcmp(type, VDEV_TYPE_LOG) == 0) {
@@ -1572,7 +1569,7 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				}
 				seen_logs = B_TRUE;
 				is_log = B_TRUE;
-				is_dedup = is_metadata = is_smallblks = B_FALSE;
+				is_special = B_FALSE;
 				argc--;
 				argv++;
 				/*
@@ -1582,47 +1579,20 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 				continue;
 			}
 
-			if (strcmp(type, VDEV_ALLOC_BIAS_DEDUP) == 0) {
-				is_dedup = B_TRUE;
-				is_log = is_metadata = is_smallblks = B_FALSE;
-				argc--;
-				argv++;
-				continue;
-			}
-
-			if (strcmp(type, VDEV_ALLOC_BIAS_METADATA) == 0) {
+			if (strcmp(type, VDEV_ALLOC_BIAS_SPECIAL) == 0) {
 				if (segregate_prop_active(props,
-				    ZPOOL_PROP_SEGREGATE_METADATA)) {
+				    ZPOOL_PROP_SEGREGATE_SPECIAL)) {
 					(void) fprintf(stderr,
 					    gettext("invalid vdev specified: "
 					    "'%s' was already specified by "
 					    "'%s' property\n"),
-					    VDEV_ALLOC_BIAS_METADATA,
+					    VDEV_ALLOC_BIAS_SPECIAL,
 					    zpool_prop_to_name(
-					    ZPOOL_PROP_SEGREGATE_METADATA));
+					    ZPOOL_PROP_SEGREGATE_SPECIAL));
 					goto spec_out;
 				}
-				is_metadata = B_TRUE;
-				is_log = is_dedup = is_smallblks = B_FALSE;
-				argc--;
-				argv++;
-				continue;
-			}
-
-			if (strcmp(type, VDEV_ALLOC_BIAS_SMALLBLKS) == 0) {
-				if (segregate_prop_active(props,
-				    ZPOOL_PROP_SEGREGATE_SMALLBLKS)) {
-					(void) fprintf(stderr,
-					    gettext("invalid vdev specified: "
-					    "'%s' was already specified by "
-					    "'%s' property\n"),
-					    VDEV_ALLOC_BIAS_SMALLBLKS,
-					    zpool_prop_to_name(
-					    ZPOOL_PROP_SEGREGATE_SMALLBLKS));
-					goto spec_out;
-				}
-				is_smallblks = B_TRUE;
-				is_log = is_metadata = is_dedup = B_FALSE;
+				is_special = B_TRUE;
+				is_log = B_FALSE;
 				argc--;
 				argv++;
 				continue;
@@ -1636,17 +1606,16 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 					    "specified only once\n"));
 					goto spec_out;
 				}
-				is_log = is_dedup = is_metadata = B_FALSE;
+				is_log = is_special = B_FALSE;
 			}
 
-			if (is_log || is_dedup || is_metadata || is_smallblks) {
+			if (is_log || is_special) {
 				if (strcmp(type, VDEV_TYPE_MIRROR) != 0) {
 					(void) fprintf(stderr,
 					    gettext("invalid vdev "
 					    "specification: unsupported '%s' "
 					    "device: %s\n"), is_log ? "log" :
-					    is_dedup ? "dedup" : is_metadata ?
-					    "metadata" : "smallblks", type);
+					    "special", type);
 					goto spec_out;
 				}
 				nlogs++;
@@ -1741,20 +1710,10 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 					verify(nvlist_add_string(nv,
 					    ZPOOL_CONFIG_ALLOCATION_BIAS,
 					    VDEV_ALLOC_BIAS_LOG) == 0);
-				if (is_dedup) {
+				if (is_special) {
 					verify(nvlist_add_string(nv,
 					    ZPOOL_CONFIG_ALLOCATION_BIAS,
-					    VDEV_ALLOC_BIAS_DEDUP) == 0);
-				}
-				if (is_metadata) {
-					verify(nvlist_add_string(nv,
-					    ZPOOL_CONFIG_ALLOCATION_BIAS,
-					    VDEV_ALLOC_BIAS_METADATA) == 0);
-				}
-				if (is_smallblks) {
-					verify(nvlist_add_string(nv,
-					    ZPOOL_CONFIG_ALLOCATION_BIAS,
-					    VDEV_ALLOC_BIAS_SMALLBLKS) == 0);
+					    VDEV_ALLOC_BIAS_SPECIAL) == 0);
 				}
 				if (strcmp(type, VDEV_TYPE_RAIDZ) == 0 ||
 				    strcmp(type, VDEV_TYPE_DRAID) == 0) {
@@ -1794,11 +1753,10 @@ construct_spec(nvlist_t *props, int argc, char **argv)
 
 			if (is_log)
 				nlogs++;
-			if (is_dedup || is_metadata || is_smallblks) {
+			if (is_special) {
 				(void) fprintf(stderr,
-				    gettext("invalid vdev specification: '%s' "
-				    "expects mirror\n"), is_dedup ? "dedup" :
-				    is_metadata ? "metadata" : "smallblks");
+				    gettext("invalid vdev specification: "
+				    "special expects mirror\n"));
 				goto spec_out;
 			}
 			argc--;

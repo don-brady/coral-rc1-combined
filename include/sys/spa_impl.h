@@ -150,8 +150,7 @@ struct spa {
 	boolean_t	spa_is_initializing;	/* true while opening pool */
 	metaslab_class_t *spa_normal_class;	/* normal data class */
 	metaslab_class_t *spa_log_class;	/* intent log data class */
-	metaslab_class_t *spa_dedup_class;	/* dedicated dedup data class */
-	metaslab_class_t *spa_custom_class;	/* custom allocation class */
+	metaslab_class_t *spa_special_class;	/* special allocation class */
 	uint64_t	spa_first_txg;		/* first txg after spa_open() */
 	uint64_t	spa_final_txg;		/* txg of export/destroy */
 	uint64_t	spa_freeze_txg;		/* freeze pool at this txg */
@@ -260,8 +259,7 @@ struct spa {
 	uint64_t	spa_did;		/* if procp != p0, did of t1 */
 	boolean_t	spa_autoreplace;	/* autoreplace set in open */
 	boolean_t	spa_segregate_log;	/* segregate vdev log data */
-	boolean_t	spa_segregate_metadata;	/* segregate vdev metadata */
-	boolean_t	spa_segregate_smallblks; /* segregate vdev small blks */
+	boolean_t	spa_segregate_special;	/* segregate vdev small+meta */
 	int		spa_vdev_locks;		/* locks grabbed */
 	uint64_t	spa_creation_version;	/* version at pool creation */
 	uint64_t	spa_prev_software_version; /* See ub_software_version */

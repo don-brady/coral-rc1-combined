@@ -143,14 +143,10 @@ zpool_prop_init(void)
 	    "segregate_log", 0, PROP_ONETIME, ZFS_TYPE_POOL, "on",
 	    "SEGREGATE_LOG", boolean_table);
 	prop_tbl[ZPOOL_PROP_SEGREGATE_LOG].pd_visible = B_FALSE;
-	zprop_register_index(ZPOOL_PROP_SEGREGATE_METADATA,
-	    "segregate_metadata", 0, PROP_ONETIME, ZFS_TYPE_POOL, "on",
-	    "SEGREGATE_METADATA", boolean_table);
-	prop_tbl[ZPOOL_PROP_SEGREGATE_METADATA].pd_visible = B_FALSE;
-	zprop_register_index(ZPOOL_PROP_SEGREGATE_SMALLBLKS,
-	    "segregate_smallblks", 0, PROP_ONETIME, ZFS_TYPE_POOL, "on",
-	    "SEGREGATE_SMALLBLKS", boolean_table);
-	prop_tbl[ZPOOL_PROP_SEGREGATE_SMALLBLKS].pd_visible = B_FALSE;
+	zprop_register_index(ZPOOL_PROP_SEGREGATE_SPECIAL,
+	    "segregate_special", 0, PROP_ONETIME, ZFS_TYPE_POOL, "on",
+	    "SEGREGATE_SPECIAL", boolean_table);
+	prop_tbl[ZPOOL_PROP_SEGREGATE_SPECIAL].pd_visible = B_FALSE;
 }
 
 /*

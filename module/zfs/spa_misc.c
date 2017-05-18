@@ -1099,8 +1099,7 @@ spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error, char *tag)
 	 */
 	ASSERT(metaslab_class_validate(spa_normal_class(spa)) == 0);
 	ASSERT(metaslab_class_validate(spa_log_class(spa)) == 0);
-	ASSERT(metaslab_class_validate(spa_dedup_class(spa)) == 0);
-	ASSERT(metaslab_class_validate(spa_custom_class(spa)) == 0);
+	ASSERT(metaslab_class_validate(spa_special_class(spa)) == 0);
 
 	spa_config_exit(spa, SCL_ALL, spa);
 
@@ -1710,15 +1709,9 @@ spa_log_class(spa_t *spa)
 }
 
 metaslab_class_t *
-spa_dedup_class(spa_t *spa)
+spa_special_class(spa_t *spa)
 {
-	return (spa->spa_dedup_class);
-}
-
-metaslab_class_t *
-spa_custom_class(spa_t *spa)
-{
-	return (spa->spa_custom_class);
+	return (spa->spa_special_class);
 }
 
 extern int zfs_class_smallblk_limit;
@@ -1727,34 +1720,29 @@ extern int zfs_class_smallblk_limit;
  * Locate an appropriate allocation class
  */
 metaslab_class_t *
-spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
-    uint64_t objset)
+spa_preferred_class(spa_t *spa, uint64_t size, dmu_object_type_t objtype,
+    int level)
 {
 #if 1
 	/* Work around until CORRAIDZ-252 is picked up */
 	if (size > 4096)
 		return (spa_normal_class(spa));
 #endif
-	if (DMU_OT_IS_DDT(objtype)) {
-		if (spa->spa_dedup_class->mc_rotor != NULL)
-			return (spa_dedup_class(spa));
-		else
-			return (spa_normal_class(spa));
-	}
 	if (DMU_OT_IS_ZIL(objtype)) {
 		if (spa->spa_log_class->mc_rotor != NULL)
 			return (spa_log_class(spa));
 		else
 			return (spa_normal_class(spa));
 	}
-	if (DMU_OT_IS_METADATA(objtype) || level > 0) {
-		if (spa->spa_custom_class->mc_rotor != NULL &&
+	if (DMU_OT_IS_METADATA(objtype) || DMU_OT_IS_DDT(objtype) ||
+	    level > 0) {
+		if (spa->spa_special_class->mc_groups != 0 &&
 		    size <= zfs_class_smallblk_limit)
-			return (spa_custom_class(spa));
+			return (spa_special_class(spa));
 		else
 			return (spa_normal_class(spa));
 	}
-	if (spa->spa_custom_class->mc_rotor != NULL) {
+	if (spa->spa_special_class->mc_rotor != NULL) {
 		/*
 		 * Limit how many small blocks we place into the custom class.
 		 * Also allow large blocks to spill into the custom class when
@@ -1766,7 +1754,7 @@ spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
 			 */
 			if (!vdev_category_space_full(spa, MS_CATEGORY_SMALL,
 			    size)) {
-				return (spa_custom_class(spa));
+				return (spa_special_class(spa));
 			}
 		} else {
 			/*
@@ -1776,7 +1764,7 @@ spa_preferred_class(spa_t *spa, uint64_t size, int objtype, int level,
 			    size) &&
 			    !vdev_category_space_full(spa, MS_CATEGORY_SMALL,
 			    size)) {
-				return (spa_custom_class(spa));
+				return (spa_special_class(spa));
 			}
 		}
 	}
@@ -2007,7 +1995,7 @@ spa_has_slogs(spa_t *spa)
 {
 	metaslab_class_t *mc = spa_log_class(spa);
 
-	return ((mc->mc_groups > 0) && (mc->mc_groups > mc->mc_partial_groups));
+	return (mc->mc_groups > mc->mc_partial_groups);
 }
 
 spa_log_state_t
@@ -2187,8 +2175,7 @@ EXPORT_SYMBOL(spa_update_dspace);
 EXPORT_SYMBOL(spa_deflate);
 EXPORT_SYMBOL(spa_normal_class);
 EXPORT_SYMBOL(spa_log_class);
-EXPORT_SYMBOL(spa_dedup_class);
-EXPORT_SYMBOL(spa_custom_class);
+EXPORT_SYMBOL(spa_special_class);
 EXPORT_SYMBOL(spa_preferred_class);
 EXPORT_SYMBOL(spa_max_replication);
 EXPORT_SYMBOL(spa_prev_software_version);

@@ -122,6 +122,8 @@ _NOTE(CONSTCOND) } while (0)
 #define	SPA_OLD_MAXBLOCKSIZE	(1ULL << SPA_OLD_MAXBLOCKSHIFT)
 #define	SPA_MAXBLOCKSIZE	(1ULL << SPA_MAXBLOCKSHIFT)
 
+#define	SPA_MAX_METASLAB_SHIFT	38	/* caps metaslab size to 256GB */
+
 /*
  * Alignment Shift (ashift) is an immutable, internal top-level vdev property
  * which can only be set at vdev creation time. Physical writes are always done
@@ -810,10 +812,9 @@ extern uint64_t spa_version(spa_t *spa);
 extern boolean_t spa_deflate(spa_t *spa);
 extern metaslab_class_t *spa_normal_class(spa_t *spa);
 extern metaslab_class_t *spa_log_class(spa_t *spa);
-extern metaslab_class_t *spa_dedup_class(spa_t *spa);
-extern metaslab_class_t *spa_custom_class(spa_t *spa);
+extern metaslab_class_t *spa_special_class(spa_t *spa);
 extern metaslab_class_t *spa_preferred_class(spa_t *spa, uint64_t size,
-    int objtype, int level, uint64_t objset);
+    dmu_object_type_t objtype, int level);
 extern void spa_evicting_os_register(spa_t *, objset_t *os);
 extern void spa_evicting_os_deregister(spa_t *, objset_t *os);
 extern void spa_evicting_os_wait(spa_t *spa);

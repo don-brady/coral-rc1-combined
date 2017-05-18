@@ -134,8 +134,7 @@ typedef enum vdev_alloc_bias {
 	VDEV_BIAS_NONE,
 	VDEV_BIAS_LOG,		/* dedicated to ZIL data (SLOG) */
 	VDEV_BIAS_DEDUP,	/* dedicated to DDT data */
-	VDEV_BIAS_METADATA,	/* dedicated to metadata (DMU and MOS) */
-	VDEV_BIAS_SMALLBLKS,	/* dedicated to small blocks (<= 32K) */
+	VDEV_BIAS_SPECIAL,	/* dedicated to ddt, metadata, and small blks */
 	VDEV_BIAS_SEGREGATE,	/* segregate metaslabs into multiple groups */
 } vdev_alloc_bias_t;
 
@@ -181,9 +180,10 @@ struct vdev {
 	uint64_t	vdev_ms_array;	/* metaslab array object	*/
 	uint64_t	vdev_ms_shift;	/* metaslab size shift		*/
 	uint64_t	vdev_ms_count;	/* number of metaslabs		*/
+	uint64_t	vdev_ms_extra;	/* additional info object	*/
 	metaslab_group_t *vdev_mg;	/* primary metaslab group	*/
 	metaslab_group_t *vdev_log_mg;	/* optional log group		*/
-	metaslab_group_t *vdev_custom_mg; /* optional metadata/smallblk	*/
+	metaslab_group_t *vdev_special_mg; /* optional special group	*/
 	metaslab_t	**vdev_ms;	/* metaslab array		*/
 	uint64_t	vdev_pending_fastwrite; /* allocated fastwrites */
 	txg_list_t	vdev_ms_list;	/* per-txg dirty metaslab lists	*/
@@ -199,6 +199,7 @@ struct vdev {
 	boolean_t	vdev_ishole;	/* is a hole in the namespace	*/
 	kmutex_t	vdev_queue_lock; /* protects vdev_queue_depth	*/
 	uint64_t	vdev_top_zap;
+	uint64_t	vdev_alloc_bias_birth; /* allocation bias start	*/
 	uint64_t	vdev_last_io;	  /* lbolt of last non-scan I/O */
 	nvlist_t	*vdev_cfg;    /* additional dRAID configuration */
 	vdev_alloc_bias_t vdev_alloc_bias; /* metaslab allocation bias	*/
@@ -428,9 +429,8 @@ extern int zfs_vdev_cache_size;
 metaslab_group_t *vdev_get_mg(vdev_t *vd, metaslab_class_t *mc);
 metaslab_group_t *vdev_metaslab_group_by_id(const vdev_t *vd, uint64_t ms_id);
 
-extern void vdev_category_space_update(vdev_t *vd, int64_t metadata_alloc_delta,
-    int64_t metadata_space_delta, int64_t smallblks_alloc_delta,
-    int64_t smallblks_space_delta, boolean_t in_class);
+extern void vdev_category_space_update(vdev_t *vd,
+    int64_t normal_assigned_delta, int64_t special_assigned_delta);
 
 boolean_t vdev_category_space_full(spa_t *spa,
     metaslab_block_category_t category, uint64_t request);

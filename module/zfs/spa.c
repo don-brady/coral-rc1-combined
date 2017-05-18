@@ -213,24 +213,11 @@ spa_prop_get_config(spa_t *spa, nvlist_t **nvp)
 	ASSERT(MUTEX_HELD(&spa->spa_props_lock));
 
 	if (rvd != NULL) {
-		metaslab_class_t *alt_mc;
-
 		alloc = metaslab_class_get_alloc(mc);
+		alloc += metaslab_class_get_alloc(spa_special_class(spa));
+
 		size = metaslab_class_get_space(mc);
-		/*
-		 * DJB - TBD does this need a fudge factor like for deflate?
-		 * like a compression factor or ditto copies?
-		 */
-		alt_mc = spa_dedup_class(spa);
-		if (alt_mc->mc_rotor != NULL) {
-			alloc += metaslab_class_get_alloc(alt_mc);
-			size += metaslab_class_get_space(alt_mc);
-		}
-		alt_mc = spa_custom_class(spa);
-		if (alt_mc->mc_rotor != NULL) {
-			alloc += metaslab_class_get_alloc(alt_mc);
-			size += metaslab_class_get_space(alt_mc);
-		}
+		size += metaslab_class_get_space(spa_special_class(spa));
 
 		spa_prop_add_list(*nvp, ZPOOL_PROP_NAME, spa_name(spa), 0, src);
 		spa_prop_add_list(*nvp, ZPOOL_PROP_SIZE, NULL, size, src);
@@ -505,8 +492,7 @@ spa_prop_validate(spa_t *spa, nvlist_t *props)
 			break;
 
 		case ZPOOL_PROP_SEGREGATE_LOG:
-		case ZPOOL_PROP_SEGREGATE_METADATA:
-		case ZPOOL_PROP_SEGREGATE_SMALLBLKS:
+		case ZPOOL_PROP_SEGREGATE_SPECIAL:
 			/* set-once that can only be enabled */
 			error = nvpair_value_uint64(elem, &intval);
 			if (!error && intval != 1)
@@ -1122,8 +1108,7 @@ spa_activate(spa_t *spa, int mode)
 
 	spa->spa_normal_class = metaslab_class_create(spa, zfs_metaslab_ops);
 	spa->spa_log_class = metaslab_class_create(spa, zfs_metaslab_ops);
-	spa->spa_dedup_class = metaslab_class_create(spa, zfs_metaslab_ops);
-	spa->spa_custom_class = metaslab_class_create(spa, zfs_metaslab_ops);
+	spa->spa_special_class = metaslab_class_create(spa, zfs_metaslab_ops);
 
 	/* Try to create a covering process */
 	mutex_enter(&spa->spa_proc_lock);
@@ -1249,11 +1234,8 @@ spa_deactivate(spa_t *spa)
 	metaslab_class_destroy(spa->spa_log_class);
 	spa->spa_log_class = NULL;
 
-	metaslab_class_destroy(spa->spa_dedup_class);
-	spa->spa_dedup_class = NULL;
-
-	metaslab_class_destroy(spa->spa_custom_class);
-	spa->spa_custom_class = NULL;
+	metaslab_class_destroy(spa->spa_special_class);
+	spa->spa_special_class = NULL;
 
 	/*
 	 * If this was part of an import or the open otherwise failed, we may
@@ -1362,19 +1344,6 @@ spa_unload(spa_t *spa)
 	if (spa->spa_sync_on) {
 		txg_sync_stop(spa->spa_dsl_pool);
 		spa->spa_sync_on = B_FALSE;
-	}
-
-	/*
-	 * Even though vdev_free() also calls vdev_metaslab_fini, we need
-	 * to call it earlier, before we wait for async i/o to complete.
-	 * This ensures that there is no async metaslab prefetching, by
-	 * calling taskq_wait(mg_taskq).
-	 */
-	if (spa->spa_root_vdev != NULL) {
-		spa_config_enter(spa, SCL_ALL, FTAG, RW_WRITER);
-		for (c = 0; c < spa->spa_root_vdev->vdev_children; c++)
-			vdev_metaslab_fini(spa->spa_root_vdev->vdev_child[c]);
-		spa_config_exit(spa, SCL_ALL, FTAG);
 	}
 
 	/*
@@ -2373,8 +2342,7 @@ void
 spa_segregated_prop_get(spa_t *spa, nvlist_t *props)
 {
 	uint64_t segregate_log = 0;
-	uint64_t segregate_metadata = 0;
-	uint64_t segregate_smallblks = 0;
+	uint64_t segregate_special = 0;
 
 	if (props != NULL) {
 		/* Create case is passed as a property */
@@ -2382,24 +2350,18 @@ spa_segregated_prop_get(spa_t *spa, nvlist_t *props)
 		    zpool_prop_to_name(ZPOOL_PROP_SEGREGATE_LOG),
 		    &segregate_log);
 		(void) nvlist_lookup_uint64(props,
-		    zpool_prop_to_name(ZPOOL_PROP_SEGREGATE_METADATA),
-		    &segregate_metadata);
-		(void) nvlist_lookup_uint64(props,
-		    zpool_prop_to_name(ZPOOL_PROP_SEGREGATE_SMALLBLKS),
-		    &segregate_smallblks);
+		    zpool_prop_to_name(ZPOOL_PROP_SEGREGATE_SPECIAL),
+		    &segregate_special);
 	} else {
 		/* Import case comes from property zap */
 		spa_prop_find(spa, ZPOOL_PROP_SEGREGATE_LOG,
 		    &segregate_log);
-		spa_prop_find(spa, ZPOOL_PROP_SEGREGATE_METADATA,
-		    &segregate_metadata);
-		spa_prop_find(spa, ZPOOL_PROP_SEGREGATE_SMALLBLKS,
-		    &segregate_smallblks);
+		spa_prop_find(spa, ZPOOL_PROP_SEGREGATE_SPECIAL,
+		    &segregate_special);
 	}
 
 	spa->spa_segregate_log = (segregate_log == 1);
-	spa->spa_segregate_metadata = (segregate_metadata == 1);
-	spa->spa_segregate_smallblks = (segregate_smallblks == 1);
+	spa->spa_segregate_special = (segregate_special == 1);
 }
 
 /*
@@ -4151,9 +4113,7 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	/*
 	 * Set-once segregate properties activate the segregated vdev feature
 	 */
-	if ((spa->spa_segregate_log ||
-	    spa->spa_segregate_metadata ||
-	    spa->spa_segregate_smallblks) &&
+	if ((spa->spa_segregate_log || spa->spa_segregate_special) &&
 	    spa_feature_is_enabled(spa, SPA_FEATURE_ALLOCATION_CLASSES)) {
 		spa_feature_incr(spa, SPA_FEATURE_ALLOCATION_CLASSES, tx);
 	}
@@ -4383,6 +4343,7 @@ spa_tryimport(nvlist_t *tryconfig)
 	char *poolname;
 	spa_t *spa;
 	uint64_t state;
+	boolean_t mosconfig;
 	int error;
 
 	if (nvlist_lookup_string(tryconfig, ZPOOL_CONFIG_POOL_NAME, &poolname))
@@ -4403,7 +4364,10 @@ spa_tryimport(nvlist_t *tryconfig)
 	 * Pass TRUE for mosconfig because the user-supplied config
 	 * is actually the one to trust when doing an import.
 	 */
-	error = spa_load(spa, SPA_LOAD_TRYIMPORT, SPA_IMPORT_EXISTING, B_TRUE);
+	mosconfig = nvlist_exists(tryconfig, ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS);
+
+	error = spa_load(spa, SPA_LOAD_TRYIMPORT, SPA_IMPORT_EXISTING,
+	    mosconfig);
 
 	/*
 	 * If 'tryconfig' was at least parsable, return the current config.
@@ -5044,9 +5008,7 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 	/*
 	 * If dedicated class, then it must remain mirrored
 	 */
-	if (pvd->vdev_alloc_bias == VDEV_BIAS_DEDUP ||
-	    pvd->vdev_alloc_bias == VDEV_BIAS_METADATA ||
-	    pvd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS) {
+	if (pvd->vdev_alloc_bias == VDEV_BIAS_SPECIAL) {
 		if (pvd->vdev_children <= 2) {
 			return (spa_vdev_exit(spa, NULL, txg, ENOTSUP));
 		}
@@ -5317,11 +5279,9 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 			}
 		}
 
-		/* disallow splitting if allocation classes present */
+		/* disallow splitting for allocation classes */
 		alloc_bias = spa->spa_root_vdev->vdev_child[c]->vdev_alloc_bias;
-		if (alloc_bias == VDEV_BIAS_DEDUP ||
-		    alloc_bias == VDEV_BIAS_METADATA ||
-		    alloc_bias == VDEV_BIAS_SMALLBLKS) {
+		if (alloc_bias == VDEV_BIAS_SPECIAL) {
 			cmn_err(CE_NOTE, "%s pool split with allocation "
 			    "classes not allowed", spa_name(spa));
 			error = SET_ERROR(EINVAL);
@@ -6091,14 +6051,12 @@ spa_async_thread(spa_t *spa)
 
 		mutex_enter(&spa_namespace_lock);
 		old_space = metaslab_class_get_space(spa_normal_class(spa));
-		old_space += metaslab_class_get_space(spa_dedup_class(spa));
-		old_space += metaslab_class_get_space(spa_custom_class(spa));
+		old_space += metaslab_class_get_space(spa_special_class(spa));
 
 		spa_config_update(spa, SPA_CONFIG_UPDATE_POOL);
 
 		new_space = metaslab_class_get_space(spa_normal_class(spa));
-		new_space += metaslab_class_get_space(spa_dedup_class(spa));
-		new_space += metaslab_class_get_space(spa_custom_class(spa));
+		new_space += metaslab_class_get_space(spa_special_class(spa));
 		mutex_exit(&spa_namespace_lock);
 
 		/*

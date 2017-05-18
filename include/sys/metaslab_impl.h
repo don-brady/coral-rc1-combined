@@ -131,6 +131,43 @@ typedef enum trace_alloc_type {
 #define	WEIGHT_SET_COUNT(weight, x)		BF64_SET((weight), 0, 55, x)
 
 /*
+ * Additional per-metaslab allocation info for dedicated/segregated vdevs
+ */
+typedef struct ms_alloc_phys {
+	uint64_t	ms_alloc_flags;		/* flags: ie segregated bias */
+	uint64_t	ms_alloc_metadata;	/* metadata space allocated */
+	uint64_t	ms_alloc_smallblks;	/* smallblks space allocated */
+	uint64_t	ms_alloc_dedup;		/* dedup space allocated */
+} ms_alloc_phys_t;
+
+/*
+ * class allocation bias (segregated vdevs only)
+ * DJB TBD -- use bit mask to allow combining ?
+ */
+typedef enum {
+	MS_ALLOC_BIAS_DEFAULT =	0x00,
+	MS_ALLOC_BIAS_LOG =	0x01,
+	MS_ALLOC_BIAS_SPECIAL =	0x02
+} ms_alloc_bias_t;
+
+/*
+ * ms_alloc_flags
+ *
+ * Note: curently only used for allocation bias in the lower 2 bits
+ *
+ * 64      56      48      40      32      24      16      8     2 0
+ * +-------+-------+-------+-------+-------+-------+-------+-----+-+
+ * |                          RESERVED                           |B|
+ * +-------+-------+-------+-------+-------+-------+-------+-------+
+ */
+#define	MS_ALLOC_FLAG_BIAS_GET(flg) \
+	(ms_alloc_bias_t)BF64_DECODE(flg, 0, 2)
+
+#define	MS_ALLOC_FLAG_BIAS_SET(flg, bias) do { \
+	((flg) ^= BF64_ENCODE((flg) ^ (bias), 0, 2)); \
+_NOTE(CONSTCOND) } while (0)
+
+/*
  * A metaslab class encompasses a category of allocatable top-level vdevs.
  * Each top-level vdev is associated with a metaslab group which defines
  * the allocatable region for that vdev. Examples of these categories include
@@ -189,7 +226,6 @@ struct metaslab_class {
 	uint64_t		mc_deferred;	/* total deferred frees */
 	uint64_t		mc_space;	/* total space (alloc + free) */
 	uint64_t		mc_dspace;	/* total deflated space */
-	uint64_t		mc_spa_sync_calloc; /* allocated during sync */
 	uint64_t		mc_histogram[RANGE_TREE_HISTOGRAM_SIZE];
 };
 
@@ -336,11 +372,11 @@ struct metaslab {
 	range_tree_t	*ms_freeingtree; /* to free this syncing txg */
 	range_tree_t	*ms_freedtree; /* already freed this syncing txg */
 	range_tree_t	*ms_defertree[TXG_DEFER_SIZE];
-	/* Track space by block categories (between syncs of SM header */
-	int64_t		ms_dedup_count[TXG_SIZE];
-	int64_t		ms_metadata_count[TXG_SIZE];
-	int64_t		ms_smallblks_count[TXG_SIZE];
-	uint64_t	ms_category_enabled_birth;
+	/* Track space by block categories (between syncs of SM header) */
+	int64_t		ms_dedup_bytes[TXG_SIZE];
+	int64_t		ms_metadata_bytes[TXG_SIZE];
+	int64_t		ms_smallblks_bytes[TXG_SIZE];
+	ms_alloc_phys_t	ms_alloc_extra;
 
 	boolean_t	ms_condensing;	/* condensing? */
 	boolean_t	ms_condense_wanted;
@@ -395,7 +431,7 @@ struct metaslab {
  *      |     |           ALLOC_BIAS=SEGREGATE           |     |
  *      |     +------------------------------------------+     |
  *      |         |        |                         |         |
- *      |         |        |           vdev_custom_mg|         |mg_vd
+ *      |         |        |          vdev_special_mg|         |mg_vd
  *      |         |        |vdev_ms                  |         |
  *      |         |        |                         V         |
  * mg_vd|  vdev_mg|        |    ________   msg  +----------+   |
@@ -423,11 +459,11 @@ struct metaslab {
  *   |            |                                  |             |
  *   |            |mg_class                          |             |
  *   |            V                                  V             |
- *   |   +------------------+               +------------------+   |
- *   |   |                  |               |                  |   |
- *   +---| SPA_NORMAL_CLASS |               | SPA_CUSTOM_CLASS |---+
- * rotor |                  |               |                  | rotor
- *       +------------------+               +------------------+
+ *   |   +------------------+              +-------------------+   |
+ *   |   |                  |              |                   |   |
+ *   +---| SPA_NORMAL_CLASS |              | SPA_SPECIAL_CLASS |---+
+ * rotor |                  |              |                   | rotor
+ *       +------------------+              +-------------------+
  */
 
 #ifdef	__cplusplus

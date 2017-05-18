@@ -90,7 +90,6 @@ void metaslab_trace_fini(zio_alloc_list_t *);
 
 void metaslab_class_stat_init(void);
 void metaslab_class_stat_fini(void);
-void metaslab_class_stat_update(metaslab_block_category_t, uint64_t, uint64_t);
 
 metaslab_class_t *metaslab_class_create(spa_t *, metaslab_ops_t *);
 void metaslab_class_destroy(metaslab_class_t *);
@@ -102,8 +101,6 @@ boolean_t metaslab_class_throttle_reserve(metaslab_class_t *, int,
     zio_t *, int);
 void metaslab_class_throttle_unreserve(metaslab_class_t *, int, zio_t *);
 
-void metaslab_class_space_update(metaslab_class_t *, int64_t, int64_t,
-    int64_t, int64_t);
 uint64_t metaslab_class_get_alloc(metaslab_class_t *);
 uint64_t metaslab_class_get_space(metaslab_class_t *);
 uint64_t metaslab_class_get_dspace(metaslab_class_t *);

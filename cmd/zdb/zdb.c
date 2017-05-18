@@ -73,7 +73,8 @@
 	zio_checksum_table[(idx)].ci_name : "UNKNOWN")
 #define	ZDB_OT_TYPE(idx) ((idx) < DMU_OT_NUMTYPES ? (idx) :		\
 	(((idx) == DMU_OTN_ZAP_DATA || (idx) == DMU_OTN_ZAP_METADATA) ?	\
-	DMU_OT_ZAP_OTHER : DMU_OT_NUMTYPES))
+	DMU_OT_ZAP_OTHER : (idx) == DMU_OTN_UINT64_METADATA ?		\
+	DMU_OT_UINT64_OTHER : DMU_OT_NUMTYPES))
 
 static char *
 zdb_ot_name(dmu_object_type_t type)
@@ -290,29 +291,6 @@ dump_space_map_header(objset_t *os, uint64_t object, void *data, size_t size)
 	    (u_longlong_t)smp->smp_objsize);
 	(void) printf("\t%14s:    %10llu\n", "smp_alloc",
 	    (u_longlong_t)smp->smp_alloc);
-	if (smp->smp_alloc_info.enabled_birth != 0) {
-		uint64_t reg_alloc;
-
-		(void) printf("\t%14s:   \n", "smp_alloc_info");
-		(void) printf("\t%17s: %10llu\n", ".enabled_birth",
-		    (u_longlong_t)smp->smp_alloc_info.enabled_birth);
-		(void) printf("\t%17s: %10llu\n", ".metadata_alloc",
-		    (u_longlong_t)smp->smp_alloc_info.metadata_alloc);
-		(void) printf("\t%17s: %10llu\n", ".smallblks_alloc",
-		    (u_longlong_t)smp->smp_alloc_info.smallblks_alloc);
-		(void) printf("\t%17s: %10llu\n", ".dedup_alloc",
-		    (u_longlong_t)smp->smp_alloc_info.dedup_alloc);
-
-		reg_alloc = smp->smp_alloc;
-		reg_alloc -= smp->smp_alloc_info.metadata_alloc;
-		reg_alloc -= smp->smp_alloc_info.smallblks_alloc;
-		reg_alloc -= smp->smp_alloc_info.dedup_alloc;
-		(void) printf("\t%17s: %10llu (calc)\n", "generic_alloc",
-		    (u_longlong_t)reg_alloc);
-	}
-	if (smp->smp_alloc_info.alloc_bias != 0)
-		(void) printf("\t%17s: 0x%llx\n", ".alloc_bias",
-		    (u_longlong_t)smp->smp_alloc_info.alloc_bias);
 }
 
 static void
@@ -440,6 +418,24 @@ dump_uint8(objset_t *os, uint64_t object, void *data, size_t size)
 static void
 dump_uint64(objset_t *os, uint64_t object, void *data, size_t size)
 {
+	if (size == 0) {
+		dmu_object_info_t doi;
+		uint64_t off, val;
+
+		VERIFY0(dmu_object_info(os, object, &doi));
+
+		for (off = 0; off < doi.doi_max_offset; off += sizeof (val)) {
+			if (dmu_read(os, object, off, sizeof (val), &val,
+			    DMU_READ_PREFETCH) == 0) {
+				(void) printf("\t[%d]: %llu\n", (int)off >> 3,
+				    (u_longlong_t)val);
+				if (((off >> 3) & 0x03ULL) == 0x03)
+					printf("\n");
+			} else {
+				break;
+			}
+		}
+	}
 }
 
 /*ARGSUSED*/
@@ -826,14 +822,21 @@ dump_allocation_line(const char *name, uint64_t value, uint64_t total)
 }
 
 static void
-dump_allocation_info(space_map_t *smp)
+dump_allocation_info(objset_t *mos, uint64_t obj, uint64_t id, uint64_t total)
 {
-	struct sm_alloc_info *info = &smp->sm_phys->smp_alloc_info;
-	uint64_t total = space_map_allocated(smp);
+	ms_alloc_phys_t ms_alloc;
 	uint64_t generic = total;
 	char number[32];
 
-	if (smp->sm_phys->smp_alloc_info.enabled_birth == 0 || total == 0)
+	if (obj == 0)
+		return;
+
+	VERIFY0(dmu_read(mos, obj, id * sizeof (ms_alloc_phys_t),
+	    sizeof (ms_alloc_phys_t), &ms_alloc, DMU_READ_PREFETCH));
+
+	if (ms_alloc.ms_alloc_metadata == 0 &&
+	    ms_alloc.ms_alloc_smallblks == 0 &&
+	    ms_alloc.ms_alloc_dedup == 0)
 		return;
 
 	zdb_nicenum(total, number);
@@ -841,14 +844,14 @@ dump_allocation_info(space_map_t *smp)
 	(void) printf("\n\tAllocation Summary:%*s%s allocated\n",
 	    dump_opt['P'] ? 7 : 10, "", number);
 
-	generic -= info->metadata_alloc;
-	dump_allocation_line("metadata", info->metadata_alloc, total);
+	generic -= ms_alloc.ms_alloc_metadata;
+	dump_allocation_line("metadata", ms_alloc.ms_alloc_metadata, total);
 
-	generic -= info->smallblks_alloc;
-	dump_allocation_line("smallblks", info->smallblks_alloc, total);
+	generic -= ms_alloc.ms_alloc_smallblks;
+	dump_allocation_line("smallblks", ms_alloc.ms_alloc_smallblks, total);
 
-	generic -= info->dedup_alloc;
-	dump_allocation_line("dedup", info->dedup_alloc, total);
+	generic -= ms_alloc.ms_alloc_dedup;
+	dump_allocation_line("dedup", ms_alloc.ms_alloc_dedup, total);
 
 	dump_allocation_line("generic", generic, total);
 	(void) printf("\n");
@@ -865,13 +868,14 @@ dump_metaslab(metaslab_t *msp)
 
 	/* segregated vdevs have multiple groups */
 	if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
-		if (msp->ms_group == vd->vdev_mg)
+		if (space_map_object(sm) == 0)
+			group = "  ----  ";
+		else if (msp->ms_group == vd->vdev_mg)
 			group = "normal";
 		else if (msp->ms_group == vd->vdev_log_mg)
 			group = "log data";
-		else if (msp->ms_group == vd->vdev_custom_mg)
-			group = spa->spa_segregate_smallblks ?
-			    "smallblk" : "metadata";
+		else if (msp->ms_group == vd->vdev_special_mg)
+			group = "special";
 	}
 
 	zdb_nicenum(msp->ms_size - space_map_allocated(sm), freebuf);
@@ -912,7 +916,8 @@ dump_metaslab(metaslab_t *msp)
 		/*
 		 * For particiating metaslabs, there is additional alloc info
 		 */
-		dump_allocation_info(sm);
+		dump_allocation_info(spa->spa_meta_objset, vd->vdev_ms_extra,
+		    msp->ms_id, space_map_allocated(sm));
 	}
 
 	if (dump_opt['d'] > 5 || dump_opt['m'] > 3) {
@@ -938,9 +943,7 @@ print_vdev_metaslab_header(vdev_t *vd)
 
 	bias_str = (alloc_bias == VDEV_BIAS_LOG || vd->vdev_islog) ?
 	    VDEV_ALLOC_BIAS_LOG :
-	    (alloc_bias == VDEV_BIAS_DEDUP) ? VDEV_ALLOC_BIAS_DEDUP :
-	    (alloc_bias == VDEV_BIAS_METADATA) ? VDEV_ALLOC_BIAS_METADATA :
-	    (alloc_bias == VDEV_BIAS_SMALLBLKS) ? VDEV_ALLOC_BIAS_SMALLBLKS :
+	    (alloc_bias == VDEV_BIAS_SPECIAL) ? VDEV_ALLOC_BIAS_SPECIAL :
 	    (alloc_bias == VDEV_BIAS_SEGREGATE) ? VDEV_ALLOC_BIAS_SEGREGATE :
 	    vd->vdev_islog ? "log" : "";
 
@@ -3492,8 +3495,7 @@ dump_block_stats(spa_t *spa)
 		flags |= TRAVERSE_PREFETCH_DATA;
 
 	zcb.zcb_totalasize = metaslab_class_get_alloc(spa_normal_class(spa));
-	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_dedup_class(spa));
-	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_custom_class(spa));
+	zcb.zcb_totalasize += metaslab_class_get_alloc(spa_special_class(spa));
 	zcb.zcb_start = zcb.zcb_lastprint = gethrtime();
 	zcb.zcb_haderrors |= traverse_pool(spa, 0, flags, zdb_blkptr_cb, &zcb);
 
@@ -3534,8 +3536,7 @@ dump_block_stats(spa_t *spa)
 
 	total_alloc = norm_alloc +
 	    metaslab_class_get_alloc(spa_log_class(spa)) +
-	    metaslab_class_get_alloc(spa_dedup_class(spa)) +
-	    metaslab_class_get_alloc(spa_custom_class(spa));
+	    metaslab_class_get_alloc(spa_special_class(spa));
 	total_found = tzb->zb_asize - zcb.zcb_dedup_asize;
 
 	if (total_found == total_alloc) {
@@ -3577,26 +3578,15 @@ dump_block_stats(spa_t *spa)
 	    (double)zcb.zcb_dedup_asize / tzb->zb_asize + 1.0);
 	(void) printf("\t%-16s %14llu     used: %5.2f%%\n", "Normal class:",
 	    (u_longlong_t)norm_alloc, 100.0 * norm_alloc / norm_space);
-	if (spa_dedup_class(spa)->mc_rotor != NULL) {
-		uint64_t alloc = metaslab_class_get_alloc(spa_dedup_class(spa));
-		uint64_t space = metaslab_class_get_space(spa_dedup_class(spa));
-
-		(void) printf("\t%-16s %14llu     used: %5.2f%%\n",
-		    "Dedup class:", (u_longlong_t)alloc, 100.0 * alloc / space);
-	}
-	if (spa_custom_class(spa)->mc_rotor != NULL) {
+	if (spa_special_class(spa)->mc_rotor != NULL) {
 		uint64_t alloc = metaslab_class_get_alloc(
-		    spa_custom_class(spa));
+		    spa_special_class(spa));
 		uint64_t space = metaslab_class_get_space(
-		    spa_custom_class(spa));
-		vdev_t *vd = spa_custom_class(spa)->mc_rotor->mg_vd;
+		    spa_special_class(spa));
 
 		(void) printf("\t%-16s %14llu     used: %5.2f%%\n",
-		    spa->spa_segregate_smallblks ? "SmallBlks Class:" :
-		    spa->spa_segregate_metadata ? "Metadata Class:" :
-		    (vd->vdev_alloc_bias == VDEV_BIAS_SMALLBLKS) ?
-		    "SmallBlks Class:" : "Metadata Class:",
-		    (u_longlong_t)alloc, 100.0 * alloc / space);
+		    "Special class", (u_longlong_t)alloc,
+		    100.0 * alloc / space);
 	}
 
 	for (i = 0; i < NUM_BP_EMBEDDED_TYPES; i++) {

@@ -95,7 +95,7 @@ extern void vdev_propagate_state(vdev_t *vd);
 extern void vdev_set_state(vdev_t *vd, boolean_t isopen, vdev_state_t state,
     vdev_aux_t aux);
 
-extern void vdev_space_update(vdev_t *vd,
+extern void vdev_space_update(vdev_t *vd, metaslab_class_t *mc,
     int64_t alloc_delta, int64_t defer_delta, int64_t space_delta);
 
 extern int64_t vdev_deflated_space(vdev_t *vd, int64_t space);

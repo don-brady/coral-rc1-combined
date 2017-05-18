@@ -505,8 +505,7 @@ vdev_draid_ms_mirrored(const vdev_t *vd, uint64_t ms_id)
 		ASSERT(mgp != NULL);
 	}
 
-	if ((spa->spa_segregate_metadata || spa->spa_segregate_smallblks) &&
-	    (mgp == vd->vdev_custom_mg))
+	if (spa->spa_segregate_special && (mgp == vd->vdev_special_mg))
 		return (B_TRUE);
 
 	return (B_FALSE);
