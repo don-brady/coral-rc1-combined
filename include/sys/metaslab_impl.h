@@ -353,7 +353,7 @@ struct metaslab_group {
  */
 struct metaslab {
 	kmutex_t	ms_lock;
-	kmutex_t        ms_sync_lock;
+	kmutex_t	ms_sync_lock;
 	kcondvar_t	ms_load_cv;
 	space_map_t	*ms_sm;
 	uint64_t	ms_id;

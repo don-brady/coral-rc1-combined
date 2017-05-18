@@ -3997,7 +3997,7 @@ metaslab_check_free(spa_t *spa, const blkptr_t *bp)
 }
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
-/* CSTYLED */
+/* BEGIN CSTYLED */
 module_param(metaslab_aliquot, ulong, 0644);
 MODULE_PARM_DESC(metaslab_aliquot,
 	"allocation granularity (a.k.a. stripe size)");
@@ -4052,5 +4052,4 @@ MODULE_PARM_DESC(zfs_max_segregate_percent,
 	"special allocations. This also requires that the pool's "
 	"segregate_special property be enabled");
 /* END CSTYLED */
-
 #endif /* _KERNEL && HAVE_SPL */

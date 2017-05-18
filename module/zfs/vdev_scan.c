@@ -219,12 +219,14 @@ spa_vdev_scan_ms_done(zio_t *zio)
 	mutex_enter(&svs->svs_lock);
 
 	if (svs->svs_thread_exit) {
-		/* Cannot mark this MS as "done", because the rebuild thread
+		/*
+		 * Cannot mark this MS as "done", because the rebuild thread
 		 * may have been interrupted in the middle of working on
 		 * this MS.
 		 */
 		mutex_exit(&svs->svs_lock);
-		draid_dbg(1, "Aborted rebuilding metaslab "U64FMT"\n", msp->ms_id);
+		draid_dbg(1, "Aborted rebuilding metaslab "U64FMT"\n",
+		    msp->ms_id);
 		return;
 	}
 
@@ -560,5 +562,6 @@ module_param(spa_vdev_scan_delay, int, 0644);
 MODULE_PARM_DESC(spa_vdev_scan_delay, "Number of ticks to delay SPA rebuild");
 
 module_param(spa_vdev_scan_idle, int, 0644);
-MODULE_PARM_DESC(spa_vdev_scan_idle, "Idle window in clock ticks for SPA rebuild");
+MODULE_PARM_DESC(spa_vdev_scan_idle,
+	"Idle window in clock ticks for SPA rebuild");
 #endif

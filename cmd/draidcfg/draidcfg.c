@@ -36,7 +36,7 @@
 
 static struct vdev_draid_configuration *
 draidcfg_find(const uint64_t data, const uint64_t parity,
-	const uint64_t spare, const uint64_t children)
+    const uint64_t spare, const uint64_t children)
 {
 	/* P  D  D...  P  D  D...  S */
 	static const uint64_t bases7[1][7] = {{1, 2, 4, 3, 6, 5, 0}};
@@ -97,7 +97,7 @@ draidcfg_find(const uint64_t data, const uint64_t parity,
 
 static struct vdev_draid_configuration *
 draidcfg_create(const uint64_t data, const uint64_t parity,
-		const uint64_t spare, const uint64_t children)
+    const uint64_t spare, const uint64_t children)
 {
 	struct vdev_draid_configuration *cfg = calloc(1, sizeof (*cfg));
 
@@ -128,7 +128,7 @@ draidcfg_free(struct vdev_draid_configuration *cfg)
 
 static int
 draidcfg_create_file(const uint64_t data, const uint64_t parity,
-		const uint64_t spare, const uint64_t children, const char *path)
+    const uint64_t spare, const uint64_t children, const char *path)
 {
 	FILE *fp;
 	size_t len;

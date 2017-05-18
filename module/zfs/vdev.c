@@ -576,7 +576,7 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 
 	if (ops == &vdev_draid_ops)
 		vd->vdev_cfg = fnvlist_dup(draidcfg);
-	
+
 	if (top_level && alloc_bias != VDEV_BIAS_NONE)
 		vd->vdev_alloc_bias = alloc_bias;
 
