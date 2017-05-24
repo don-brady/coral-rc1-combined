@@ -36,15 +36,17 @@ spa_vdev_scan_done(zio_t *zio)
 {
 	spa_t *spa = zio->io_spa;
 	dsl_scan_t *scn = spa->spa_dsl_pool->dp_scan;
+	uint64_t asize;
 
 	ASSERT(zio->io_bp != NULL);
 
 	abd_free(zio->io_abd);
-
-	scn->scn_phys.scn_examined += DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
-	spa->spa_scan_pass_exam += DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
+	asize = DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
 
 	mutex_enter(&spa->spa_scrub_lock);
+
+	scn->scn_phys.scn_examined += asize;
+	spa->spa_scan_pass_exam += asize;
 
 	spa->spa_scrub_inflight--;
 	cv_broadcast(&spa->spa_scrub_io_cv);
@@ -170,7 +172,7 @@ spa_vdev_scan_draid_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
 
 	while (length > 0 && !svs->svs_thread_exit) {
 		uint64_t group, group_left, chunksz;
-		char *action = "Skipping";
+		char *action;
 
 		/*
 		 * Make sure we don't cross redundancy group boundary
@@ -187,6 +189,16 @@ spa_vdev_scan_draid_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
 		    offset, chunksz, mirror)) {
 			action = "Fixing";
 			spa_vdev_scan_rebuild(svs, pio, vd, offset, chunksz);
+		} else {
+			spa_t *spa = vd->vdev_spa;
+			dsl_scan_t *scn = spa->spa_dsl_pool->dp_scan;
+
+			action = "Skipping";
+
+			mutex_enter(&spa->spa_scrub_lock);
+			scn->scn_phys.scn_examined += chunksz;
+			spa->spa_scan_pass_exam += chunksz;
+			mutex_exit(&spa->spa_scrub_lock);
 		}
 
 		draid_dbg(3, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
