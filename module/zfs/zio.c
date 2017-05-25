@@ -32,6 +32,7 @@
 #include <sys/txg.h>
 #include <sys/spa_impl.h>
 #include <sys/vdev_impl.h>
+#include <sys/vdev_draid_impl.h>
 #include <sys/zio_impl.h>
 #include <sys/zio_compress.h>
 #include <sys/zio_checksum.h>
@@ -756,7 +757,8 @@ zfs_blkptr_verify(spa_t *spa, const blkptr_t *bp)
 	 * that are in the log) to be arbitrarily large.
 	 */
 	for (i = 0; i < BP_GET_NDVAS(bp); i++) {
-		uint64_t vdevid = DVA_GET_VDEV(&bp->blk_dva[i]);
+		const dva_t *dva = &bp->blk_dva[i];
+		uint64_t vdevid = DVA_GET_VDEV(dva);
 		vdev_t *vd;
 		uint64_t offset, asize;
 		if (vdevid >= spa->spa_root_vdev->vdev_children) {
@@ -786,11 +788,23 @@ zfs_blkptr_verify(spa_t *spa, const blkptr_t *bp)
 			 */
 			continue;
 		}
-		offset = DVA_GET_OFFSET(&bp->blk_dva[i]);
-		asize = DVA_GET_ASIZE(&bp->blk_dva[i]);
-		if (BP_IS_GANG(bp))
-			asize = vdev_psize_to_asize(vd, SPA_GANGBLOCKSIZE,
-			    offset);
+
+		offset = DVA_GET_OFFSET(dva);
+		if (BP_IS_GANG(bp)) {
+			if (vd->vdev_ops == &vdev_draid_ops) {
+				boolean_t mirror =
+				    DVA_GET_DRAID_MIRROR(dva) != 0 ?
+				    B_TRUE : B_FALSE;
+
+				asize = vdev_draid_asize_by_type(vd,
+				    SPA_GANGBLOCKSIZE, mirror);
+			} else {
+				asize = vdev_psize_to_asize(vd,
+				    SPA_GANGBLOCKSIZE, offset);
+			}
+		} else {
+			asize = DVA_GET_ASIZE(dva);
+		}
 		if (offset + asize > vd->vdev_asize) {
 			zfs_panic_recover("blkptr at %p DVA %u has invalid "
 			    "OFFSET %llu",

@@ -749,18 +749,14 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 
 	if (nvlist_lookup_uint64(config,
 	    ZPOOL_CONFIG_DRAIDCFG_CHILDREN, &n) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n",
+		draid_dbg(0, "Missing %s in configuration\n",
 		    ZPOOL_CONFIG_DRAIDCFG_CHILDREN);
-#endif
 		return (B_FALSE);
 	}
 
 	if (n - 1 > VDEV_DRAID_U8_MAX) {
-#ifndef _KERNEL
-		fprintf(stderr, "%s configuration too invalid: %lu\n",
+		draid_dbg(0, "%s configuration too invalid: "U64FMT"\n",
 		    ZPOOL_CONFIG_DRAIDCFG_CHILDREN, n);
-#endif
 		return (B_FALSE);
 	}
 	if (vd != NULL && n != vd->vdev_children)
@@ -768,10 +764,8 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 
 	if (nvlist_lookup_uint64(config,
 	    ZPOOL_CONFIG_DRAIDCFG_PARITY, &p) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n",
+		draid_dbg(0, "Missing %s in configuration\n",
 		    ZPOOL_CONFIG_DRAIDCFG_PARITY);
-#endif
 		return (B_FALSE);
 	}
 
@@ -779,66 +773,50 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 		return (B_FALSE);
 
 	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_DATA, &d) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n",
+		draid_dbg(0, "Missing %s in configuration\n",
 		    ZPOOL_CONFIG_DRAIDCFG_DATA);
-#endif
 		return (B_FALSE);
 	}
 
 	if (nvlist_lookup_uint64(config,
 	    ZPOOL_CONFIG_DRAIDCFG_SPARE, &s) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n",
+		draid_dbg(0, "Missing %s in configuration\n",
 		    ZPOOL_CONFIG_DRAIDCFG_SPARE);
-#endif
 		return (B_FALSE);
 	}
 
 	if (nvlist_lookup_uint64(config, ZPOOL_CONFIG_DRAIDCFG_BASE, &b) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n",
+		draid_dbg(0, "Missing %s in configuration\n",
 		    ZPOOL_CONFIG_DRAIDCFG_BASE);
-#endif
 		return (B_FALSE);
 	}
 
 	if (n == 0 || d == 0 || p == 0 || s == 0 || b == 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Zero n/d/p/s/b\n");
-#endif
+		draid_dbg(0, "Zero n/d/p/s/b\n");
 		return (B_FALSE);
 	}
 
 	if (p > VDEV_RAIDZ_MAXPARITY) {
-#ifndef _KERNEL
-		fprintf(stderr, gettext("Invalid parity %lu\n"), p);
-#endif
+		draid_dbg(0, "Invalid parity "U64FMT"\n", p);
 		return (B_FALSE);
 	}
 
 	if ((n - s) % (p + d) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "%lu mod %lu is not 0\n", n - s, p + d);
-#endif
+		draid_dbg(0, U64FMT" mod "U64FMT" is not 0\n", n - s, p + d);
 		return (B_FALSE);
 	}
 
 	if (nvlist_lookup_uint8_array(config,
 	    ZPOOL_CONFIG_DRAIDCFG_PERM, &perm, &c) != 0) {
-#ifndef _KERNEL
-		fprintf(stderr, "Missing %s in configuration\n",
+		draid_dbg(0, "Missing %s in configuration\n",
 		    ZPOOL_CONFIG_DRAIDCFG_PERM);
-#endif
 		return (B_FALSE);
 	}
 
 	if (c != b * n) {
-#ifndef _KERNEL
-		fprintf(stderr,
-		    "Permutation array has %u items, but %lu expected\n",
+		draid_dbg(0,
+		    "Permutation array has %u items, but "U64FMT" expected\n",
 		    c, b * n);
-#endif
 		return (B_FALSE);
 	}
 
@@ -848,22 +826,18 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 			uint64_t val = perm[i * n + j];
 
 			if (val >= n) {
-#ifndef _KERNEL
-				fprintf(stderr,
-				    "Invalid value %lu in permutation %d\n",
-				    val, i);
-#endif
+				draid_dbg(0,
+				    "Invalid value "U64FMT" in "
+				    "permutation %d\n", val, i);
 				return (B_FALSE);
 			}
 
 			for (k = 0; k < j; k++) {
 				if (val == perm[i * n + k]) {
-#ifndef _KERNEL
-					fprintf(stderr,
-					    "Duplicated value %lu in "
+					draid_dbg(0,
+					    "Duplicated value "U64FMT" in "
 					    "permutation %d\n",
 					    val, i);
-#endif
 					return (B_FALSE);
 				}
 			}
