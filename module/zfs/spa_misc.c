@@ -1723,30 +1723,26 @@ metaslab_class_t *
 spa_preferred_class(spa_t *spa, uint64_t size, dmu_object_type_t objtype,
     int level)
 {
-#if 1
-	/* Work around until CORRAIDZ-252 is picked up */
-	if (size > 4096)
-		return (spa_normal_class(spa));
-#endif
 	if (DMU_OT_IS_ZIL(objtype)) {
-		if (spa->spa_log_class->mc_rotor != NULL)
+		if (spa->spa_log_class->mc_groups != 0)
 			return (spa_log_class(spa));
 		else
 			return (spa_normal_class(spa));
 	}
 	if (DMU_OT_IS_METADATA(objtype) || DMU_OT_IS_DDT(objtype) ||
 	    level > 0) {
+		/* dRAID TBD -- limit mirror metaslabs to 32K */
 		if (spa->spa_special_class->mc_groups != 0 &&
 		    size <= zfs_class_smallblk_limit)
 			return (spa_special_class(spa));
 		else
 			return (spa_normal_class(spa));
 	}
-	if (spa->spa_special_class->mc_rotor != NULL) {
+	if (spa->spa_special_class->mc_groups != 0) {
 		/*
 		 * Limit how many small blocks we place into the custom class.
 		 * Also allow large blocks to spill into the custom class when
-		 * the nomal class is full.
+		 * the normal class is full.
 		 */
 		if (size <= zfs_class_smallblk_limit) {
 			/*
