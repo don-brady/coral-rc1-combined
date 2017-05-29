@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
  * Copyright 2016 RackTop Systems.
+ * Copyright (c) 2017, Intel Corporation.
  */
 
 #ifndef	_SYS_ZFS_IOCTL_H
@@ -336,6 +337,11 @@ typedef struct zinject_record {
 
 #define	ZEVENT_SEEK_START	0
 #define	ZEVENT_SEEK_END		UINT64_MAX
+
+/* Note percentage usage has higher resolution */
+#define	zi_percentage	zi_freq
+#define	ZI_PERCENTAGE_MIN	4294UL
+#define	ZI_PERCENTAGE_MAX	UINT32_MAX
 
 typedef enum zinject_type {
 	ZINJECT_UNINITIALIZED,

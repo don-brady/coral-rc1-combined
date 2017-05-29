@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
+ * Copyright (c) 2017, Intel Corporation.
  */
 
 /*
@@ -293,6 +294,16 @@ zio_handle_device_injection(vdev_t *vd, zio_t *zio, int error)
 				continue;
 
 			if (handler->zi_record.zi_error == error) {
+				/*
+				 * limit error injection if requested
+				 */
+				if (handler->zi_record.zi_percentage >
+				    ZI_PERCENTAGE_MIN) {
+					if (spa_get_random(ZI_PERCENTAGE_MAX) >=
+					    handler->zi_record.zi_percentage)
+						continue;
+				}
+
 				/*
 				 * For a failed open, pretend like the device
 				 * has gone away.

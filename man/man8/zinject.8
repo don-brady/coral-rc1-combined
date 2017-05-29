@@ -76,7 +76,7 @@ create 3 lanes on the device; one lane with a latency
 of 10 ms and two lanes with a 25 ms latency.
 
 .TP
-.B "zinject \-d \fIvdev\fB [\-e \fIdevice_error\fB] [\-L \fIlabel_error\fB] [\-T \fIfailure\fB] [\-F] \fIpool\fB"
+.B "zinject \-d \fIvdev\fB [\-e \fIdevice_error\fB] [\-L \fIlabel_error\fB] [\-T \fIfailure\fB] [\-P \fIpercentage\fB] [\-F] \fIpool\fB"
 Force a vdev error.
 .TP
 .B "zinject \-I [\-s \fIseconds\fB | \-g \fItxgs\fB] \fIpool\fB"
@@ -137,6 +137,10 @@ Set the label error region to one of
 .TP
 .BI "\-m"
 Automatically remount the underlying filesystem.
+.TP
+.BI "\-P" " pergentage"
+Only inject device errors a percentage of the time. Expressed as a
+real number between 0.0001 and 100.0
 .TP
 .BI "\-q"
 Quiet mode. Only print the handler number added.

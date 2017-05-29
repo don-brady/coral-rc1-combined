@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
+ * Copyright (c) 2017, Intel Corporation.
  */
 
 /*
@@ -141,6 +142,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
+#include <tgmath.h>
 #include <unistd.h>
 
 #include <sys/fs/zfs.h>
@@ -230,11 +232,13 @@ usage(void)
 	    "\t\tspa_vdev_exit() will trigger a panic.\n"
 	    "\n"
 	    "\tzinject -d device [-e errno] [-L <nvlist|uber|pad1|pad2>] [-F]\n"
-	    "\t    [-T <read|write|free|claim|all> pool\n"
+	    "\t    [-T <read|write|free|claim|all>] [-P percentage] pool\n"
 	    "\t\tInject a fault into a particular device or the device's\n"
 	    "\t\tlabel.  Label injection can either be 'nvlist', 'uber',\n "
 	    "\t\t'pad1', or 'pad2'.\n"
 	    "\t\t'errno' can be 'nxio' (the default), 'io', or 'dtl'.\n"
+	    "\t\t'percentage' is a value between 0.0001 and 100.0 that limits\n"
+	    "\t\tdevice error injection to a percentage of the IOs.\n"
 	    "\n"
 	    "\tzinject -d device -A <degrade|fault> -D <delay secs> pool\n"
 	    "\t\tPerform a specific action on a particular device.\n"
@@ -645,6 +649,27 @@ parse_delay(char *str, uint64_t *delay, uint64_t *nlanes)
 	return (0);
 }
 
+static int
+parse_percent(const char *str, uint32_t *percent)
+{
+	double val;
+	char *post;
+
+	val = strtod(str, &post);
+	if (post == NULL || *post != '\0')
+		return (1);
+
+	/* valid range is [0.0001, 100.0] */
+	val /= 100.0f;
+	if (val < 0.000001f || val > 1.0f)
+		return (1);
+
+	/* convert to an integer for use by kernel */
+	*percent = nearbyint(val * ZI_PERCENTAGE_MAX);
+
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -701,7 +726,7 @@ main(int argc, char **argv)
 	}
 
 	while ((c = getopt(argc, argv,
-	    ":aA:b:d:D:f:Fg:qhIc:t:T:l:mr:s:e:uL:p:")) != -1) {
+	    ":aA:b:d:D:f:Fg:qhIc:t:T:l:mr:s:e:uL:p:P:")) != -1) {
 		switch (c) {
 		case 'a':
 			flags |= ZINJECT_FLUSH_ARC;
@@ -812,6 +837,15 @@ main(int argc, char **argv)
 			    sizeof (record.zi_func));
 			record.zi_cmd = ZINJECT_PANIC;
 			break;
+		case 'P':
+			ret = parse_percent(optarg, &record.zi_percentage);
+			if (ret != 0) {
+				(void) fprintf(stderr, "percentage value must "
+				    "be in the range [0.0001, 100.0]\n");
+				libzfs_fini(g_zfs);
+				return (1);
+			}
+			break;
 		case 'q':
 			quiet = 1;
 			break;
@@ -898,7 +932,8 @@ main(int argc, char **argv)
 		 * '-c' is invalid with any other options.
 		 */
 		if (raw != NULL || range != NULL || type != TYPE_INVAL ||
-		    level != 0 || record.zi_cmd != ZINJECT_UNINITIALIZED) {
+		    level != 0 || record.zi_cmd != ZINJECT_UNINITIALIZED ||
+		    record.zi_freq > 0) {
 			(void) fprintf(stderr, "cancel (-c) incompatible with "
 			    "any other options\n");
 			usage();
@@ -959,6 +994,15 @@ main(int argc, char **argv)
 			return (1);
 		}
 
+		if (record.zi_freq > 0 &&
+		    record.zi_freq < ZI_PERCENTAGE_MIN) {
+			(void) fprintf(stderr, "device (-d) incompatible with "
+			    "'-f', use '-P' to specify a percentage value\n");
+			usage();
+			libzfs_fini(g_zfs);
+			return (2);
+		}
+
 		record.zi_iotype = io_type;
 		if (translate_device(pool, device, label, &record) != 0) {
 			libzfs_fini(g_zfs);
@@ -972,7 +1016,8 @@ main(int argc, char **argv)
 
 	} else if (raw != NULL) {
 		if (range != NULL || type != TYPE_INVAL || level != 0 ||
-		    record.zi_cmd != ZINJECT_UNINITIALIZED) {
+		    record.zi_cmd != ZINJECT_UNINITIALIZED ||
+		    record.zi_freq > 0) {
 			(void) fprintf(stderr, "raw (-b) format with "
 			    "any other options\n");
 			usage();
@@ -1007,7 +1052,7 @@ main(int argc, char **argv)
 			error = EIO;
 	} else if (record.zi_cmd == ZINJECT_PANIC) {
 		if (raw != NULL || range != NULL || type != TYPE_INVAL ||
-		    level != 0 || device != NULL) {
+		    level != 0 || device != NULL || record.zi_freq > 0) {
 			(void) fprintf(stderr, "panic (-p) incompatible with "
 			    "other options\n");
 			usage();
