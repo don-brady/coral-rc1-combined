@@ -3913,6 +3913,9 @@ zio_done(zio_t *zio)
 	}
 
 	if (zio->io_error && zio == zio->io_logical) {
+#ifndef _KERNEL
+		uint8_t io_reexecute = zio->io_reexecute;
+#endif
 		/*
 		 * Determine whether zio should be reexecuted.  This will
 		 * propagate all the way to the root via zio_notify_parent().
@@ -3946,6 +3949,20 @@ zio_done(zio_t *zio)
 		 * to send out preliminary ereports before we suspend
 		 * processing.
 		 */
+#ifndef _KERNEL
+		/* To help diagnose 'uncorrectable I/O failures' in ztest... */
+		if (zio->io_reexecute & ZIO_REEXECUTE_SUSPEND &&
+		    (io_reexecute & ZIO_REEXECUTE_SUSPEND) == 0 &&
+		    (zio->io_flags & ZIO_FLAG_GODFATHER) == 0 &&
+		    spa_get_failmode(zio->io_spa) == ZIO_FAILURE_MODE_PANIC) {
+			char bp_buf[BP_SPRINTF_LEN];
+
+			snprintf_blkptr(bp_buf, sizeof (bp_buf), zio->io_bp);
+			(void) fprintf(stderr, "suspend zio %p err %d type %d\n"
+			    "  BP: %s\n", zio->io_bp, (int)zio->io_error,
+			    (int)zio->io_type, bp_buf);
+		}
+#endif
 	}
 
 	/*
