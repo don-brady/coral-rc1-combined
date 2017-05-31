@@ -44,7 +44,7 @@ if [[ -n $DISK ]]; then
 
         partition_disk $SIZE $DISK 3
 else
-        for disk in `$ECHO $DISKSARRAY`; do
+        for disk in `echo $DISKSARRAY`; do
                 cleanup_devices $disk
 
                 partition_disk $SIZE $disk 3

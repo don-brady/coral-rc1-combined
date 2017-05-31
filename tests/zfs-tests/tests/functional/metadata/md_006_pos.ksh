@@ -50,32 +50,29 @@ for type in "" "mirror" "raidz" "raidz2"
 do
 	for option in "" "-f"
 	do
-		for ac_type in "metadata" "smallblks"
+		for mdtype in "mirror"
 		do
-			for mdtype in "mirror"
-			do
-				log_must zpool create $TESTPOOL $option $type $ZPOOL_DISKS
-				md_value="$(zpool get all -H -o property,value | \
-				    egrep allocation_classes  | awk '{print $2}')"
-				if [ "$md_value" = "enabled" ]; then
-					log_note "feature@allocation_classes is enabled"
-				else
-					log_fail "feature@allocation_classes not enabled, \
-					    status = $md_value"
-				fi
+			log_must zpool create $TESTPOOL $option $type $ZPOOL_DISKS
+			md_value="$(zpool get all -H -o property,value | \
+			    egrep allocation_classes  | awk '{print $2}')"
+			if [ "$md_value" = "enabled" ]; then
+				log_note "feature@allocation_classes is enabled"
+			else
+				log_fail "feature@allocation_classes not enabled, \
+				    status = $md_value"
+			fi
 
-				log_must zpool add $TESTPOOL $ac_type $mdtype $MD_DISKS
-				md_value="$(zpool get all -H -o property,value | \
-				    egrep allocation_classes | awk '{print $2}')"
-				if [ "$md_value" = "active" ]; then
-					log_note "feature@allocation_classes is active"
-				else
-					log_fail "feature@allocation_classes not active, \
-					    status = $md_value"
-				fi
+			log_must zpool add $TESTPOOL special $mdtype $MD_DISKS
+			md_value="$(zpool get all -H -o property,value | \
+			    egrep allocation_classes | awk '{print $2}')"
+			if [ "$md_value" = "active" ]; then
+				log_note "feature@allocation_classes is active"
+			else
+				log_fail "feature@allocation_classes not active, \
+				    status = $md_value"
+			fi
 
-				log_must zpool destroy -f $TESTPOOL
-			done
+			log_must zpool destroy -f $TESTPOOL
 		done
 	done
 done

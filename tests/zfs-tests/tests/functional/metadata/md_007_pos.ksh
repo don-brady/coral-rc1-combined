@@ -49,20 +49,17 @@ for type in "" "mirror" "raidz" "raidz2"
 do
 	for option in "" "-f"
 	do
-		for ac_type in "metadata" "smallblks"
+		for mdtype in "mirror"
 		do
-			for mdtype in "mirror"
-			do
-				log_must zpool create $TESTPOOL $option $type $ZPOOL_DISKS \
-				    $ac_type $mdtype $MD_DISKS
-				log_must zpool attach $TESTPOOL $MD_DISK1 $MD_EXTRA1
-				log_must zpool detach $TESTPOOL $MD_EXTRA1
-				log_must zpool attach $TESTPOOL $MD_DISK1 $MD_EXTRA1
-				log_must zpool detach $TESTPOOL $MD_DISK1
-				log_must zpool attach $TESTPOOL $MD_DISK0 $MD_DISK1
-				log_must zpool detach $TESTPOOL $MD_DISK0
-				log_must zpool destroy -f $TESTPOOL
-			done
+			log_must zpool create $TESTPOOL $option $type $ZPOOL_DISKS \
+			    special $mdtype $MD_DISKS
+			log_must zpool attach $TESTPOOL $MD_DISK1 $MD_EXTRA1
+			log_must zpool detach $TESTPOOL $MD_EXTRA1
+			log_must zpool attach $TESTPOOL $MD_DISK1 $MD_EXTRA1
+			log_must zpool detach $TESTPOOL $MD_DISK1
+			log_must zpool attach $TESTPOOL $MD_DISK0 $MD_DISK1
+			log_must zpool detach $TESTPOOL $MD_DISK0
+			log_must zpool destroy -f $TESTPOOL
 		done
 	done
 done

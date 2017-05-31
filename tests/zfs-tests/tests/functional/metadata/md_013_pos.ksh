@@ -49,7 +49,7 @@ for type in "" "mirror" "raidz" "raidz2"
 do
 	for option in "" "-f"
 	do
-		for ac_type in "metadata" "smallblks" "log"
+		for ac_type in "special" "log"
 		do
 			log_must zpool create $TESTPOOL $option -o segregate_${ac_type}=on \
 			    $type $ZPOOL_DISKS

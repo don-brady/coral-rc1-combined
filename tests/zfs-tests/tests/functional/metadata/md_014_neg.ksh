@@ -44,7 +44,7 @@ log_onexit cleanup
 
 for option in "" "-f"
 do
-	for ac_type in "metadata" "smallblks" "log"
+	for ac_type in "special" "log"
 	do
 			log_mustnot zpool create $TESTPOOL $option -o segregate_${ac_type}=on $ZPOOL_DISKS \
 			    $ac_type mirror $MD_DISKS

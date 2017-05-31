@@ -22,7 +22,6 @@ outputdir = /var/tmp/test_results
 [tests/functional/metadata]
 tests = ['md_001_pos', 'md_002_neg', 'md_003_pos',
     'md_004_neg', 'md_005_pos', 'md_006_pos',
-    'md_007_pos', 'md_008_neg', #'md_009_neg',
+    'md_007_pos', 'md_008_neg', 'md_009_neg',
     'md_010_pos', 'md_011_pos', 'md_012_pos',
-    'md_013_pos', 'md_014_neg', 'md_015_pos',
-    'md_016_pos' ]
+    'md_013_pos', 'md_014_neg'] #, 'md_015_pos' ]

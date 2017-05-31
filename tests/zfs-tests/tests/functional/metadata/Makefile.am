@@ -18,6 +18,5 @@ dist_pkgdata_SCRIPTS = \
 	md_012_pos.ksh \
 	md_013_pos.ksh \
 	md_014_neg.ksh \
-	md_015_pos.ksh \
-	md_016_pos.ksh
+	md_015_pos.ksh
 

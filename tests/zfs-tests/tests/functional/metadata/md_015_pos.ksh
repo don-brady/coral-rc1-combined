@@ -43,7 +43,6 @@ verify_runnable "global"
 log_assert "Checking active allocation classes feature flag status successful."
 log_onexit cleanup
 
-
 #
 # zpool list -CHp
 # 1 = Name
@@ -57,42 +56,31 @@ log_onexit cleanup
 # 9 = Metadata Alloc
 # 10 = Metadata Using
 #
-log_must $ZPOOL create $TESTPOOL -f -o segregate_metadata=on $ZPOOL_DISKS
-log_must $ZFS set xattr=sa $TESTPOOL
+log_must zpool create $TESTPOOL -f -o segregate_smallblks=on $ZPOOL_DISKS
+log_must zfs set recordsize=32k $TESTPOOL
 
-#With a 32k xattr a file's metadata should take roughly 4 16k blocks.
-let "filealloc=65536"
-let "xattr=32768"
-typeset -i files=0
+set -A values $(zpool list -CHp $TESTPOOL | head -n1 | awk '{print $2, $3, $5, $6}')
+let "filesize=((${values[2]} - ${values[3]}) / 4)"
+let "files=5"
 
-set -A values $(zpool list -CHp $TESTPOOL | head -n1 | awk '{print $2, $3, $8, $9}')
-while [[ ${values[3]} -lt ${values[2]} ]]
-do
-	#fill the space with 0 data MD files
-	let "lfiles=((${values[2]} - ${values[3]}) / ${filealloc})"
-	log_must $XATTRTEST -p /$TESTPOOL -k -f $lfiles -s ${xattr} -R
-	files=$files+$lfiles
-	set -A values $(zpool list -CHp $TESTPOOL | head -n1 | awk '{print $2, $3, $8, $9}')
-done
+make_files /$TESTPOOL "file" $files $filesize
 
-let "filedelete=$files/2"
-
-overage=$(cat /proc/spl/kstat/zfs/alloc_class_stats | grep metadata_highest_overage | awk '{print $3}')
+overage=$(cat /proc/spl/kstat/zfs/alloc_class_stats | grep smallblks_highest_overage | awk '{print $3}')
 
 if [[ $overage -lt 1 ]]
 then
 	log_fail "There is no overage"
 fi
 
+let "filedelete=$files/2"
 for filenum in $(seq $filedelete $files)
 do
 	rm -f /$TESTPOOL/file-$filenum
 done
 
 log_must printf "0" > /proc/spl/kstat/zfs/alloc_class_stats
-log_must $XATTRTEST -p /$TESTPOOL -k -f 1 -s ${xattr} -R
-overage=$(cat /proc/spl/kstat/zfs/alloc_class_stats | grep metadata_highest_overage | awk '{print $3}')
-
+make_files /$TESTPOOL "files" 1 $filesize
+overage=$(cat /proc/spl/kstat/zfs/alloc_class_stats | grep smallblks_highest_overage | awk '{print $3}')
 if [[ $overage -gt 0 ]]
 then
 	log_fail "There should be no overage"

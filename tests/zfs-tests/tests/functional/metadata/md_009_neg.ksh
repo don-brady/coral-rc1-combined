@@ -44,12 +44,9 @@ log_assert "Zpool split command successfully fails."
 log_onexit cleanup
 
 
-for ac_type in "metadata" "smallblks"
-do
-	log_must zpool create $TESTPOOL mirror $ZPOOL_DISKS \
-			 $ac_type mirror $MD_DISKS
-	log_mustnot zpool split $TESTPOOL split_pool $MD_DISK1
-	log_must zpool destroy -f $TESTPOOL
-done
+log_must zpool create $TESTPOOL mirror $ZPOOL_DISKS \
+		 special mirror $MD_DISKS
+log_mustnot zpool split $TESTPOOL split_pool $MD_DISK1
+log_must zpool destroy -f $TESTPOOL
 
 log_pass "Zpool split command successfully fails."
