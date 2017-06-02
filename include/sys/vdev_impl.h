@@ -133,6 +133,7 @@ struct vdev_queue {
 typedef enum vdev_alloc_bias {
 	VDEV_BIAS_NONE,
 	VDEV_BIAS_LOG,		/* dedicated to ZIL data (SLOG) */
+	VDEV_BIAS_DEDUP,	/* dedicated to DDT data */
 	VDEV_BIAS_SPECIAL,	/* dedicated to ddt, metadata, and small blks */
 	VDEV_BIAS_SEGREGATE,	/* segregate metaslabs into multiple groups */
 } vdev_alloc_bias_t;

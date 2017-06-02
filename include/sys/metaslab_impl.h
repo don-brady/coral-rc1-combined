@@ -372,7 +372,6 @@ struct metaslab {
 	range_tree_t	*ms_freeingtree; /* to free this syncing txg */
 	range_tree_t	*ms_freedtree; /* already freed this syncing txg */
 	range_tree_t	*ms_defertree[TXG_DEFER_SIZE];
-
 	/* Track space by block categories (between syncs of SM header) */
 	int64_t		ms_dedup_bytes[TXG_SIZE];
 	int64_t		ms_metadata_bytes[TXG_SIZE];

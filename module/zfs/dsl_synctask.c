@@ -151,7 +151,10 @@ dsl_sync_task_sync(dsl_sync_task_t *dst, dmu_tx_t *tx)
 	ASSERT0(dst->dst_error);
 
 	mc = spa_preferred_class(dp->dp_spa, dst->dst_space, DMU_OT_NONE, 0);
-
+#if 1
+	/* Work around until CORRAIDZ-252 is picked up */
+	mc = spa_normal_class(dp->dp_spa);
+#endif
 	/*
 	 * Check for sufficient space.
 	 *
