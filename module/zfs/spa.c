@@ -2338,6 +2338,50 @@ vdev_count_verify_zaps(vdev_t *vd)
 }
 #endif
 
+/*
+ * Transfer the vdev top zap keys from mos-config into config
+ */
+static void
+spa_config_transfer_topzap(nvlist_t *config, nvlist_t *mos)
+{
+	nvlist_t *ctree, *mtree;
+	nvlist_t **c_child, **m_child;
+	uint_t c, c_max, m_max, count;
+
+	if (!nvlist_exists(mos, ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS))
+		return;
+
+	VERIFY0(nvlist_lookup_nvlist(config, ZPOOL_CONFIG_VDEV_TREE, &ctree));
+	VERIFY0(nvlist_lookup_nvlist(mos, ZPOOL_CONFIG_VDEV_TREE, &mtree));
+
+	/*
+	 * scan through all the top level vdevs to transfer top zap
+	 */
+	if (nvlist_lookup_nvlist(config, ZPOOL_CONFIG_VDEV_TREE, &ctree) != 0 ||
+	    nvlist_lookup_nvlist_array(ctree, ZPOOL_CONFIG_CHILDREN, &c_child,
+	    &c_max) != 0) {
+		return;
+	}
+	if (nvlist_lookup_nvlist(mos, ZPOOL_CONFIG_VDEV_TREE, &mtree) != 0 ||
+	    nvlist_lookup_nvlist_array(mtree, ZPOOL_CONFIG_CHILDREN, &m_child,
+	    &m_max) != 0) {
+		return;
+	}
+	count = MIN(c_max, m_max);
+
+	for (c = 0; c < count; c++) {
+		uint64_t top_zap;
+
+		/* transfer missing top zap */
+		if (nvlist_lookup_uint64(m_child[c], ZPOOL_CONFIG_VDEV_TOP_ZAP,
+		    &top_zap) == 0) {
+			VERIFY0(nvlist_add_uint64(c_child[c],
+			    ZPOOL_CONFIG_VDEV_TOP_ZAP, top_zap));
+		}
+	}
+	fnvlist_add_boolean(config, ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS);
+}
+
 void
 spa_segregated_prop_get(spa_t *spa, nvlist_t *props)
 {
@@ -2740,6 +2784,33 @@ spa_load_impl(spa_t *spa, uint64_t pool_guid, nvlist_t *config,
 		spa_activate(spa, orig_mode);
 
 		return (spa_load(spa, state, SPA_IMPORT_EXISTING, B_TRUE));
+
+	} else if (!nvlist_exists(config, ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS)) {
+		/*
+		 * The current config is missing vdev zaps. The top vdev
+		 * zap is required before vdev metaslabs are initialized
+		 * for both dRAID and the special allocation class.
+		 *
+		 * Note that we cannot just replace the config with the
+		 * mos config since the passed in config may also contain
+		 * vdev path updates that need to be picked up.
+		 */
+		nvlist_t *mos;
+
+		if (load_nvlist(spa, spa->spa_config_object, &mos) == 0) {
+			spa_config_transfer_topzap(config, mos);
+			nvlist_free(mos);
+
+			spa_unload(spa);
+			spa_deactivate(spa);
+			spa_activate(spa, orig_mode);
+
+			error = spa_load(spa, state, SPA_IMPORT_EXISTING,
+			    B_TRUE);
+			if (error == 0)
+				spa_async_suspend(spa);
+			return (error);
+		}
 	}
 
 	/* Grab the checksum salt from the MOS. */
@@ -4343,7 +4414,6 @@ spa_tryimport(nvlist_t *tryconfig)
 	char *poolname;
 	spa_t *spa;
 	uint64_t state;
-	boolean_t mosconfig;
 	int error;
 
 	if (nvlist_lookup_string(tryconfig, ZPOOL_CONFIG_POOL_NAME, &poolname))
@@ -4364,10 +4434,7 @@ spa_tryimport(nvlist_t *tryconfig)
 	 * Pass TRUE for mosconfig because the user-supplied config
 	 * is actually the one to trust when doing an import.
 	 */
-	mosconfig = nvlist_exists(tryconfig, ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS);
-
-	error = spa_load(spa, SPA_LOAD_TRYIMPORT, SPA_IMPORT_EXISTING,
-	    mosconfig);
+	error = spa_load(spa, SPA_LOAD_TRYIMPORT, SPA_IMPORT_EXISTING, B_TRUE);
 
 	/*
 	 * If 'tryconfig' was at least parsable, return the current config.
