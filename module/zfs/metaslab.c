@@ -241,8 +241,6 @@ static ms_class_stats_t ms_class_stats = {
 
 #define	MS_CLASS_STAT(stat)	(ms_class_stats.stat.value.ui64)
 
-#define	MIN_CUSTOM_METASLABS    4
-
 /*
  * ==========================================================================
  * Metaslab classes
@@ -2445,6 +2443,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 	range_tree_t *alloctree = msp->ms_alloctree[txg & TXG_MASK];
 	dmu_tx_t *tx;
 	uint64_t object = space_map_object(msp->ms_sm);
+	boolean_t ms_alloc_dirty = B_FALSE;
 
 	ASSERT(!vd->vdev_ishole);
 
@@ -2512,6 +2511,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 
 			MS_ALLOC_FLAG_BIAS_SET(
 			    msp->ms_alloc_extra.ms_alloc_flags, ms_bias);
+			ms_alloc_dirty = B_TRUE;
 
 			/* Assign metaslab space to vdev_stat */
 			vdev_category_space_update(vd,
@@ -2551,6 +2551,11 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		ASSERT0(msp->ms_alloc_extra.ms_alloc_dedup & (1ULL<<63));
 		ASSERT0(msp->ms_alloc_extra.ms_alloc_metadata & (1ULL<<63));
 		ASSERT0(msp->ms_alloc_extra.ms_alloc_smallblks & (1ULL<<63));
+
+		if (msp->ms_dedup_bytes[txg & TXG_MASK] != 0 ||
+		    msp->ms_metadata_bytes[txg & TXG_MASK] != 0 ||
+		    msp->ms_smallblks_bytes[txg & TXG_MASK] != 0)
+			ms_alloc_dirty = B_TRUE;
 
 		msp->ms_dedup_bytes[txg & TXG_MASK] = 0;
 		msp->ms_metadata_bytes[txg & TXG_MASK] = 0;
@@ -2639,8 +2644,9 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		    msp->ms_id, sizeof (uint64_t), &object, tx);
 	}
 
-	if (vd->vdev_alloc_bias_birth != 0) {
+	if (vd->vdev_alloc_bias_birth != 0 && ms_alloc_dirty) {
 		ASSERT(vd->vdev_ms_extra != 0);
+		ASSERT(object != 0);
 
 		dmu_write(mos, vd->vdev_ms_extra, sizeof (ms_alloc_phys_t) *
 		    msp->ms_id, sizeof (ms_alloc_phys_t),
@@ -3351,7 +3357,17 @@ next:
 		 * we may end up in an infinite loop retrying the same
 		 * metaslab.
 		 */
+#if 1
+		/* To assist debugging log context */
+		if (metaslab_should_allocate(msp, asize)) {
+			cmn_err(CE_WARN, "ms-%llu metaslab_should_allocate "
+			    "disagrees: asize %llu, space %llu, alloc %llu, "
+			    "max_size %llu", msp->ms_id, asize, msp->ms_size,
+			    space_map_allocated(msp->ms_sm), msp->ms_max_size);
+		}
+#else
 		ASSERT(!metaslab_should_allocate(msp, asize));
+#endif
 		mutex_exit(&msp->ms_lock);
 	}
 	mutex_exit(&msp->ms_lock);

@@ -2783,22 +2783,25 @@ vdev_sync(vdev_t *vd, uint64_t txg)
 
 	if (vd->vdev_alloc_bias > VDEV_BIAS_LOG && vd->vdev_ms_extra == 0 &&
 	    vd->vdev_ms_shift != 0) {
-		int err;
+		int blocksize, err;
 
 		ASSERT(vd->vdev_top_zap != 0);
 
+		blocksize = vd->vdev_ms_count * sizeof (ms_alloc_phys_t);
+		blocksize = P2ROUNDUP(blocksize, SPA_MINBLOCKSIZE);
+		blocksize = MIN(blocksize, SPA_OLD_MAXBLOCKSIZE);
+
 		tx = dmu_tx_create_assigned(spa->spa_dsl_pool, txg);
 		vd->vdev_ms_extra = dmu_object_alloc(spa->spa_meta_objset,
-		    DMU_OTN_UINT64_METADATA, 0, DMU_OT_NONE, 0, tx);
+		    DMU_OTN_UINT64_METADATA, blocksize, DMU_OT_NONE, 0, tx);
 		ASSERT(vd->vdev_ms_extra != 0);
-		vdev_config_dirty(vd);
 
 		err = zap_add(spa->spa_meta_objset, vd->vdev_top_zap,
 		    VDEV_TOP_ZAP_METASLAB_INFO_OBJ, sizeof (uint64_t), 1,
 		    &vd->vdev_ms_extra, tx);
 		if (err)
-			cmn_err(CE_PANIC, "vd-%d failed to add ms_extra obj "
-			    "%llu to zap, err %d, txg %llu", (int)vd->vdev_id,
+			cmn_err(CE_PANIC, "vd-%llu failed to add ms_extra obj "
+			    "%llu to zap, err %d, txg %llu", vd->vdev_id,
 			    vd->vdev_ms_extra, err, txg);
 
 		if (vd->vdev_alloc_bias_birth == 0) {
@@ -3696,26 +3699,24 @@ boolean_t
 vdev_category_space_full(spa_t *spa, metaslab_block_category_t category,
     uint64_t request)
 {
-	uint64_t space, alloc;
+	metaslab_class_t *mc;
+	uint64_t space = 0, alloc = 0;
 
 	if (category == MS_CATEGORY_SMALL) {
-		space = metaslab_class_get_space(spa_special_class(spa));
-		space = (space * VDEV_MS_METADATA_RESERVE) / 100;
-		alloc = metaslab_class_get_alloc(spa_special_class(spa));
-		alloc += request;
-
-		return (alloc > space);
+		mc = spa_special_class(spa);
+		space = metaslab_class_get_space(mc);
+		/* Maintain a reserve for metadata */
+		space = (space * (100 - VDEV_MS_METADATA_RESERVE)) / 100;
+		alloc = metaslab_class_get_alloc(mc) + request;
 	}
 
 	if (category == MS_CATEGORY_REGULAR) {
-		metaslab_class_t *mc = spa_normal_class(spa);
-
-		if ((metaslab_class_get_alloc(mc) + request) <
-		    metaslab_class_get_space(mc))
-			return (B_FALSE);
+		mc = spa_normal_class(spa);
+		space = metaslab_class_get_space(mc);
+		alloc = metaslab_class_get_alloc(mc) + request;
 	}
 
-	return (B_FALSE);
+	return (alloc > space);
 }
 
 /*

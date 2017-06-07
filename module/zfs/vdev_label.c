@@ -448,6 +448,7 @@ vdev_config_generate(spa_t *spa, vdev_t *vd, boolean_t getstats,
 				break;
 			case VDEV_BIAS_SPECIAL:
 				bias = VDEV_ALLOC_BIAS_SPECIAL;
+				break;
 			case VDEV_BIAS_SEGREGATE:
 				bias = VDEV_ALLOC_BIAS_SEGREGATE;
 				break;

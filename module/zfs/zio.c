@@ -1436,7 +1436,16 @@ zio_write_compress(zio_t *zio)
 	    BP_GET_PSIZE(bp) == psize &&
 	    pass >= zfs_sync_pass_rewrite) {
 		enum zio_stage gang_stages = zio->io_pipeline & ZIO_GANG_STAGES;
-		ASSERT(psize != 0);
+#ifdef ZFS_DEBUG
+		if (psize == 0) {
+			char bp_buf[BP_SPRINTF_LEN];
+
+			snprintf_blkptr(bp_buf, sizeof (bp_buf), bp);
+			cmn_err(CE_WARN, "zio_write_compress: 0 psize, off "
+			    "%llu\nBP: %s\n", zio->io_offset, bp_buf);
+		}
+#endif
+		VERIFY3U(psize, !=, 0);
 		zio->io_pipeline = ZIO_REWRITE_PIPELINE | gang_stages;
 		zio->io_flags |= ZIO_FLAG_IO_REWRITE;
 	} else {
