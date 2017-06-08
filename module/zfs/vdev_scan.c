@@ -73,7 +73,6 @@ spa_vdev_scan_rebuild_block(zio_t *pio, vdev_t *vd,
 	uint64_t psize;
 	spa_t *spa = vd->vdev_spa;
 	boolean_t draid_mirror = B_FALSE;
-	ASSERTV(uint64_t ashift = vd->vdev_top->vdev_ashift);
 
 	ASSERT(vd->vdev_ops == &vdev_draid_ops ||
 	    vd->vdev_ops == &vdev_mirror_ops);
@@ -99,18 +98,9 @@ spa_vdev_scan_rebuild_block(zio_t *pio, vdev_t *vd,
 		if (faulted == vd->vdev_nparity)
 			delay /= 2; /* critical, go faster */
 
-		if (vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift)) {
-			ASSERT0((asize >> ashift) % (1 + vd->vdev_nparity));
-			psize = asize / (1 + vd->vdev_nparity);
-			draid_mirror = B_TRUE;
-		} else {
-			struct vdev_draid_configuration *cfg = vd->vdev_tsd;
-
-			ASSERT0((asize >> ashift) %
-			    (cfg->dcf_data + vd->vdev_nparity));
-			psize = (asize / (cfg->dcf_data + vd->vdev_nparity)) *
-			    cfg->dcf_data;
-		}
+		draid_mirror = vdev_draid_ms_mirrored(vd,
+		    offset >> vd->vdev_ms_shift);
+		psize = vdev_draid_asize2psize(vd, asize, offset);
 	}
 	ASSERT3U(asize, ==, vdev_psize_to_asize(vd, psize, offset));
 
@@ -146,7 +136,12 @@ static void
 spa_vdev_scan_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
     vdev_t *vd, uint64_t offset, uint64_t length)
 {
-	uint64_t max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE, offset);
+	uint64_t max_asize;
+
+	if (vd->vdev_ops == &vdev_draid_ops)
+		max_asize = vdev_draid_max_rebuildable_asize(vd, offset);
+	else
+		max_asize = vdev_psize_to_asize(vd, SPA_MAXBLOCKSIZE, offset);
 
 	while (length > 0 && !svs->svs_thread_exit) {
 		uint64_t chunksz = MIN(length, max_asize);

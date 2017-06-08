@@ -1041,6 +1041,60 @@ vdev_draid_asize(vdev_t *vd, uint64_t psize, uint64_t offset)
 	return (vdev_draid_asize_by_type(vd, psize, mirror));
 }
 
+uint64_t
+vdev_draid_asize2psize(vdev_t *vd, uint64_t asize, uint64_t offset)
+{
+	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
+	uint64_t ashift = vd->vdev_top->vdev_ashift;
+	uint64_t msid = offset >> vd->vdev_ms_shift;
+	boolean_t mirror = vdev_draid_ms_mirrored(vd, msid);
+	uint64_t psize;
+
+	ASSERT0(P2PHASE(asize, 1ULL << ashift));
+	ASSERT0(P2PHASE(offset, 1ULL << ashift));
+
+	if (mirror) {
+		ASSERT0((asize >> ashift) % (1 + vd->vdev_nparity));
+		psize = asize / (1 + vd->vdev_nparity);
+	} else {
+		ASSERT0((asize >> ashift) % (cfg->dcf_data + vd->vdev_nparity));
+		psize = (asize / (cfg->dcf_data + vd->vdev_nparity)) * cfg->dcf_data;
+	}
+
+	if (psize > SPA_MAXBLOCKSIZE) {
+		draid_dbg(0, "Psize "U64FMT" too big at offset "U64FMT" from "
+		    "asize "U64FMT", ashift "U64FMT", %s MS "U64FMT"\n",
+		    psize, offset, asize, ashift,
+		    mirror ? "mirrored" : "draid", msid);
+	}
+	ASSERT3U(psize, <=, SPA_MAXBLOCKSIZE);
+
+	return (psize);
+}
+
+uint64_t
+vdev_draid_max_rebuildable_asize(vdev_t *vd, uint64_t offset)
+{
+	uint64_t maxpsize = SPA_MAXBLOCKSIZE;
+	uint64_t ashift = vd->vdev_top->vdev_ashift;
+	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
+
+	if (vdev_draid_ms_mirrored(vd, offset >> vd->vdev_ms_shift))
+		return (vdev_draid_asize_by_type(vd, maxpsize, B_TRUE));
+
+	/*
+	 * When SPA_MAXBLOCKSIZE>>ashift does not divide evenly by the number
+	 * of data drives, the remainder must be discarded. Otherwise the skip
+	 * sectors will cause vdev_draid_asize2psize() to get a psize larger
+	 * than SPA_MAXBLOCKSIZE
+	 */
+	maxpsize >>= ashift;
+	maxpsize /= cfg->dcf_data;
+	maxpsize *= cfg->dcf_data;
+	maxpsize <<= ashift;
+	return (vdev_draid_asize_by_type(vd, maxpsize, B_FALSE));
+}
+
 boolean_t
 vdev_draid_need_resilver(vdev_t *vd, uint64_t offset, size_t psize)
 {
