@@ -3356,18 +3356,12 @@ next:
 		 * that metaslab_should_allocate() agrees. Otherwise,
 		 * we may end up in an infinite loop retrying the same
 		 * metaslab.
+		 *
+		 * Note that dRAID may reject for alignment reasons not
+		 * considered by metaslab_should_allocate().
 		 */
-#if 1
-		/* To assist debugging log context */
-		if (metaslab_should_allocate(msp, asize)) {
-			cmn_err(CE_WARN, "ms-%llu metaslab_should_allocate "
-			    "disagrees: asize %llu, space %llu, alloc %llu, "
-			    "max_size %llu", msp->ms_id, asize, msp->ms_size,
-			    space_map_allocated(msp->ms_sm), msp->ms_max_size);
-		}
-#else
-		ASSERT(!metaslab_should_allocate(msp, asize));
-#endif
+		ASSERT(!metaslab_should_allocate(msp, asize) ||
+		    vd->vdev_ops == &vdev_draid_ops);
 		mutex_exit(&msp->ms_lock);
 	}
 	mutex_exit(&msp->ms_lock);
