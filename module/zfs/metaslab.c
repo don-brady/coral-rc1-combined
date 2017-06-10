@@ -1549,7 +1549,7 @@ metaslab_init(metaslab_group_t *mg, uint64_t id, uint64_t object, uint64_t txg,
 				} else if (bias == MS_ALLOC_BIAS_LOG) {
 					mg = vdev_get_mg(vd,
 					    spa_log_class(spa));
-				} else {
+				} else /* MS_ALLOC_BIAS_NORMAL */ {
 					vdev_category_space_update(vd,
 					    ms->ms_size, 0);
 				}
@@ -2502,7 +2502,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 
 		/* segregated vdev persistent class */
 		if (vd->vdev_alloc_bias == VDEV_BIAS_SEGREGATE) {
-			ms_alloc_bias_t ms_bias = MS_ALLOC_BIAS_DEFAULT;
+			ms_alloc_bias_t ms_bias = MS_ALLOC_BIAS_NORMAL;
 
 			if (mg->mg_class == spa_special_class(spa))
 				ms_bias = MS_ALLOC_BIAS_SPECIAL;
@@ -2514,11 +2514,10 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 			ms_alloc_dirty = B_TRUE;
 
 			/* Assign metaslab space to vdev_stat */
-			vdev_category_space_update(vd,
-			    ms_bias == MS_ALLOC_BIAS_DEFAULT ?
-			    msp->ms_size : 0,
-			    ms_bias == MS_ALLOC_BIAS_SPECIAL ?
-			    msp->ms_size : 0);
+			if (ms_bias == MS_ALLOC_BIAS_NORMAL)
+				vdev_category_space_update(vd, msp->ms_size, 0);
+			else if (ms_bias == MS_ALLOC_BIAS_SPECIAL)
+				vdev_category_space_update(vd, 0, msp->ms_size);
 		}
 	}
 

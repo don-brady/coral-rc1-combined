@@ -145,9 +145,10 @@ typedef struct ms_alloc_phys {
  * DJB TBD -- use bit mask to allow combining ?
  */
 typedef enum {
-	MS_ALLOC_BIAS_DEFAULT =	0x00,
-	MS_ALLOC_BIAS_LOG =	0x01,
-	MS_ALLOC_BIAS_SPECIAL =	0x02
+	MS_ALLOC_BIAS_UNASSIGNED =	0x00,
+	MS_ALLOC_BIAS_LOG =		0x01,
+	MS_ALLOC_BIAS_SPECIAL =		0x02,
+	MS_ALLOC_BIAS_NORMAL =		0x03
 } ms_alloc_bias_t;
 
 /*

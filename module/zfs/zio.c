@@ -1420,7 +1420,7 @@ zio_write_compress(zio_t *zio)
 		zio->io_pipeline = zio->io_orig_pipeline;
 
 	} else {
-		ASSERT3U(psize, !=, 0);
+		VERIFY3U(psize, !=, 0);
 
 	}
 
@@ -1441,8 +1441,8 @@ zio_write_compress(zio_t *zio)
 			char bp_buf[BP_SPRINTF_LEN];
 
 			snprintf_blkptr(bp_buf, sizeof (bp_buf), bp);
-			cmn_err(CE_WARN, "zio_write_compress: 0 psize, off "
-			    "%llu\nBP: %s\n", zio->io_offset, bp_buf);
+			cmn_err(CE_WARN, "zio_write_compress: psize 0, lsize "
+			    "%llu in pass %d\nBP: %s\n", lsize, pass, bp_buf);
 		}
 #endif
 		VERIFY3U(psize, !=, 0);
