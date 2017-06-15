@@ -1808,7 +1808,8 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 void
 dsl_resilver_restart(dsl_pool_t *dp, uint64_t txg)
 {
-	ASSERT3P(dp->dp_spa->spa_vdev_scan, ==, NULL);
+	if (dp->dp_spa->spa_vdev_scan != NULL)
+		return;
 
 	if (txg == 0) {
 		dmu_tx_t *tx;
