@@ -95,7 +95,7 @@ spa_vdev_scan_rebuild_block(zio_t *pio, vdev_t *vd,
 				faulted++;
 		}
 
-		if (faulted == vd->vdev_nparity)
+		if (faulted >= vd->vdev_nparity)
 			delay = 0; /* critical, go full speed */
 
 		draid_mirror = vdev_draid_ms_mirrored(vd,
