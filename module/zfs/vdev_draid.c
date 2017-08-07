@@ -248,11 +248,13 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift,
 		    abd_alloc_linear(rm->rm_col[c].rc_size, B_TRUE);
 
 	abd_off = 0;
-	rm->rm_col[c].rc_abd = abd_get_offset(zio->io_abd, abd_off);
+	rm->rm_col[c].rc_abd = abd_get_offset_size(zio->io_abd, abd_off,
+	    rm->rm_col[c].rc_size);
 	abd_off += rm->rm_col[c].rc_size;
 
 	for (c = c + 1; c < acols; c++) {
-		rm->rm_col[c].rc_abd = abd_get_offset(zio->io_abd, abd_off);
+		rm->rm_col[c].rc_abd = abd_get_offset_size(zio->io_abd,
+		    abd_off, rm->rm_col[c].rc_size);
 		abd_off += rm->rm_col[c].rc_size;
 	}
 
@@ -1247,7 +1249,8 @@ vdev_draid_io_start(zio_t *zio)
 				continue;
 			}
 
-			abd = abd_get_offset(rm->rm_abd_skip, i << ashift);
+			abd = abd_get_offset_size(rm->rm_abd_skip,
+			    i << ashift, 1ULL << ashift);
 			*((int *)abd_to_buf(abd)) = 1;
 			rc->rc_abd_skip = abd;
 
