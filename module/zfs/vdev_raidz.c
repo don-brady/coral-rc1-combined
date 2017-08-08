@@ -147,7 +147,7 @@ vdev_raidz_map_free(raidz_map_t *rm)
 		abd_put(rm->rm_col[c].rc_abd);
 
 	if (rm->rm_abd_skip != NULL) {
-		ASSERT(rm->rm_declustered);
+		ASSERT(vdev_raidz_map_declustered(rm));
 		abd_free(rm->rm_abd_skip);
 	}
 
@@ -399,7 +399,7 @@ vdev_raidz_map_alloc(zio_t *zio, uint64_t unit_shift, uint64_t dcols,
 	rm->rm_freed = 0;
 	rm->rm_ecksuminjected = 0;
 	rm->rm_abd_skip = NULL;
-	rm->rm_declustered = B_FALSE;
+	rm->rm_vdev = NULL;
 
 	asize = 0;
 
@@ -617,22 +617,6 @@ vdev_raidz_generate_parity_pq(raidz_map_t *rm)
 			}
 		}
 	}
-
-	if (!rm->rm_declustered)
-		return;
-
-	/* IO doesn't span all child vdevs. */
-	for (; c < rm->rm_scols; c++) {
-		q = abd_to_buf(rm->rm_col[VDEV_RAIDZ_Q].rc_abd);
-
-		/*
-		 * Treat skip sectors as though they are full of 0s.
-		 * Note that there's therefore nothing needed for P.
-		 */
-		for (i = 0; i < pcnt; i++) {
-			VDEV_RAIDZ_64MUL_2(q[i], mask);
-		}
-	}
 }
 
 static void
@@ -684,24 +668,6 @@ vdev_raidz_generate_parity_pqr(raidz_map_t *rm)
 			}
 		}
 	}
-
-	if (!rm->rm_declustered)
-		return;
-
-	/* IO doesn't span all child vdevs. */
-	for (; c < rm->rm_scols; c++) {
-		q = abd_to_buf(rm->rm_col[VDEV_RAIDZ_Q].rc_abd);
-		r = abd_to_buf(rm->rm_col[VDEV_RAIDZ_R].rc_abd);
-
-		/*
-		 * Treat skip sectors as though they are full of 0s.
-		 * Note that there's therefore nothing needed for P.
-		 */
-		for (i = 0; i < pcnt; i++) {
-			VDEV_RAIDZ_64MUL_2(q[i], mask);
-			VDEV_RAIDZ_64MUL_4(r[i], mask);
-		}
-	}
 }
 
 /*
@@ -711,23 +677,30 @@ vdev_raidz_generate_parity_pqr(raidz_map_t *rm)
 void
 vdev_raidz_generate_parity(raidz_map_t *rm)
 {
-	/* Generate using the new math implementation */
-	if (vdev_raidz_math_generate(rm) != RAIDZ_ORIGINAL_IMPL)
-		return;
+	int cols = 0;
 
-	switch (rm->rm_firstdatacol) {
-	case 1:
-		vdev_raidz_generate_parity_p(rm);
-		break;
-	case 2:
-		vdev_raidz_generate_parity_pq(rm);
-		break;
-	case 3:
-		vdev_raidz_generate_parity_pqr(rm);
-		break;
-	default:
-		cmn_err(CE_PANIC, "invalid RAID-Z configuration");
+	if (vdev_raidz_map_declustered(rm) && rm->rm_firstdatacol > 1)
+		cols = vdev_draid_hide_skip_sectors(rm);
+
+	/* Generate using the new math implementation */
+	if (vdev_raidz_math_generate(rm) == RAIDZ_ORIGINAL_IMPL) {
+		switch (rm->rm_firstdatacol) {
+		case 1:
+			vdev_raidz_generate_parity_p(rm);
+			break;
+		case 2:
+			vdev_raidz_generate_parity_pq(rm);
+			break;
+		case 3:
+			vdev_raidz_generate_parity_pqr(rm);
+			break;
+		default:
+			cmn_err(CE_PANIC, "invalid RAID-Z configuration");
+		}
 	}
+
+	if (cols != 0)
+		vdev_draid_restore_skip_sectors(rm, cols);
 }
 
 /* ARGSUSED */
@@ -1563,7 +1536,7 @@ vdev_raidz_reconstruct(raidz_map_t *rm, const int *t, int nt)
 	ASSERT(nbaddata >= 0);
 	ASSERT(nbaddata + nbadparity == ntgts);
 
-	if (rm->rm_declustered)
+	if (vdev_raidz_map_declustered(rm))
 		cols = vdev_draid_hide_skip_sectors(rm);
 
 	dt = &tgts[nbadparity];
@@ -1611,7 +1584,7 @@ vdev_raidz_reconstruct(raidz_map_t *rm, const int *t, int nt)
 	ASSERT(code < (1 << VDEV_RAIDZ_MAXPARITY));
 	ASSERT(code > 0);
 out:
-	if (rm->rm_declustered)
+	if (cols != 0)
 		vdev_draid_restore_skip_sectors(rm, cols);
 	return (code);
 }
@@ -1922,7 +1895,7 @@ raidz_parity_verify(zio_t *zio, raidz_map_t *rm)
 		abd_free(orig[c]);
 	}
 
-	if (ret != 0 && rm->rm_declustered)
+	if (ret != 0 && vdev_raidz_map_declustered(rm))
 		vdev_draid_debug_zio(zio, B_FALSE);
 	return (ret);
 }
@@ -2375,7 +2348,7 @@ done:
 		}
 	}
 
-	if (rm->rm_declustered)
+	if (vdev_raidz_map_declustered(rm))
 		vdev_draid_fix_skip_sectors(zio);
 }
 

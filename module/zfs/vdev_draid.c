@@ -122,9 +122,11 @@ vdev_draid_get_permutation(uint64_t *p, uint64_t nr,
 }
 
 noinline static raidz_map_t *
-vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift,
-    const struct vdev_draid_configuration *cfg, uint64_t **array)
+vdev_draid_map_alloc(zio_t *zio, uint64_t **array)
 {
+	vdev_t *vd = zio->io_vd;
+	const struct vdev_draid_configuration *cfg = vd->vdev_tsd;
+	const uint64_t unit_shift = vd->vdev_top->vdev_ashift;
 	const uint64_t ndata = cfg->dcf_data;
 	const uint64_t nparity = cfg->dcf_parity;
 	const uint64_t nspare = cfg->dcf_spare;
@@ -203,7 +205,7 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift,
 	rm->rm_reports = 0;
 	rm->rm_freed = 0;
 	rm->rm_ecksuminjected = 0;
-	rm->rm_declustered = B_TRUE;
+	rm->rm_vdev = vd;
 
 	VERIFY0(vdev_draid_get_permutation(permutation, perm, cfg));
 
@@ -262,11 +264,7 @@ vdev_draid_map_alloc(zio_t *zio, uint64_t unit_shift,
 		kmem_free(permutation, sizeof (permutation[0]) * ncols);
 	else
 		*array = permutation; /* caller will free */
-	/*
-	 * HH: rm->rm_ops = vdev_raidz_math_get_ops();
-	 * once dRAID supports all parity implementations
-	 */
-	rm->rm_ops = (void *)&vdev_raidz_original_impl;
+	rm->rm_ops = vdev_raidz_math_get_ops();
 	zio->io_vsd = rm;
 	zio->io_vsd_ops = &vdev_raidz_vsd_ops;
 	return (rm);
@@ -707,7 +705,7 @@ vdev_draid_group_degraded(vdev_t *vd, vdev_t *oldvd,
 			    U64FMT"%s ", mc->mc_vd->vdev_id, status);
 		}
 	} else {
-		raidz_map_t *rm = vdev_draid_map_alloc(zio, ashift, cfg, &perm);
+		raidz_map_t *rm = vdev_draid_map_alloc(zio, &perm);
 
 		ASSERT3U(rm->rm_scols, ==, cfg->dcf_parity + cfg->dcf_data);
 
@@ -1149,7 +1147,7 @@ vdev_draid_io_start(zio_t *zio)
 		return;
 	}
 
-	rm = vdev_draid_map_alloc(zio, ashift, cfg, NULL);
+	rm = vdev_draid_map_alloc(zio, NULL);
 
 	ASSERT3U(rm->rm_asize, ==,
 	    vdev_draid_asize_by_type(vd, zio->io_size, B_FALSE));
@@ -1274,11 +1272,14 @@ vdev_draid_hide_skip_sectors(raidz_map_t *rm)
 {
 	int c, cols;
 	size_t size = rm->rm_col[0].rc_size;
+	vdev_t *vd = rm->rm_vdev;
+	struct vdev_draid_configuration *cfg;
 
-	ASSERT(rm->rm_declustered);
+	ASSERT(vdev_raidz_map_declustered(rm));
+
+	cfg = vd->vdev_tsd;
 
 	for (c = rm->rm_cols; c < rm->rm_scols; c++) {
-		void *buf;
 		raidz_col_t *rc = &rm->rm_col[c];
 
 		ASSERT0(rc->rc_size);
@@ -1286,11 +1287,10 @@ vdev_draid_hide_skip_sectors(raidz_map_t *rm)
 		ASSERT0(rc->rc_tried);
 		ASSERT0(rc->rc_skipped);
 		ASSERT(rc->rc_abd == NULL);
+		ASSERT3U(1ULL << vd->vdev_top->vdev_ashift, >=, size);
 
 		rc->rc_size = size;
-		rc->rc_abd = abd_alloc_linear(size, B_TRUE);
-		buf = abd_to_buf(rc->rc_abd);
-		bzero(buf, size);
+		rc->rc_abd = cfg->dcf_zero_abd;
 	}
 
 	cols = rm->rm_cols;
@@ -1303,9 +1303,9 @@ vdev_draid_restore_skip_sectors(raidz_map_t *rm, int cols)
 {
 	int c;
 
-	ASSERT(rm->rm_declustered);
 	ASSERT3U(cols, >, rm->rm_firstdatacol);
 	ASSERT3U(cols, <=, rm->rm_scols);
+	ASSERT(vdev_raidz_map_declustered(rm));
 
 	for (c = cols; c < rm->rm_scols; c++) {
 		raidz_col_t *rc = &rm->rm_col[c];
@@ -1315,7 +1315,6 @@ vdev_draid_restore_skip_sectors(raidz_map_t *rm, int cols)
 		ASSERT0(rc->rc_skipped);
 		ASSERT(rc->rc_abd != NULL);
 
-		abd_free(rc->rc_abd);
 		rc->rc_size = 0;
 		rc->rc_abd = NULL;
 	}
@@ -1333,8 +1332,8 @@ vdev_draid_fix_skip_sectors(zio_t *zio)
 	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 	const uint64_t size = 1ULL << vd->vdev_top->vdev_ashift;
 
-	ASSERT(rm->rm_declustered);
 	vdev_draid_assert_vd(vd);
+	ASSERT3P(rm->rm_vdev, ==, vd);
 
 	if (rm->rm_abd_skip == NULL)
 		return;

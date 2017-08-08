@@ -29,6 +29,7 @@
 #include <sys/debug.h>
 #include <sys/kstat.h>
 #include <sys/abd.h>
+#include <sys/vdev_impl.h>
 
 #ifdef  __cplusplus
 extern "C" {
@@ -129,14 +130,16 @@ typedef struct raidz_map {
 	unsigned int rm_freed;		/* map no longer has referencing ZIO */
 	unsigned int rm_ecksuminjected;	/* checksum error was injected */
 	raidz_impl_ops_t *rm_ops;	/* RAIDZ math operations */
-	boolean_t rm_declustered;	/* dRAID? */
+	vdev_t *rm_vdev;		/* RAIDz/dRAID vdev */
 	raidz_col_t rm_col[1];		/* Flexible array of I/O columns */
 } raidz_map_t;
+
+#define vdev_raidz_map_declustered(rm) ((rm)->rm_vdev != NULL && \
+		(rm)->rm_vdev->vdev_ops == &vdev_draid_ops)
 
 #define	RAIDZ_ORIGINAL_IMPL	(INT_MAX)
 
 extern const raidz_impl_ops_t vdev_raidz_scalar_impl;
-extern const raidz_impl_ops_t vdev_raidz_original_impl;
 #if defined(__x86_64) && defined(HAVE_SSE2)	/* only x86_64 for now */
 extern const raidz_impl_ops_t vdev_raidz_sse2_impl;
 #endif
