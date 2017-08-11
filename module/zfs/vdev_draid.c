@@ -881,16 +881,6 @@ vdev_draid_config_add(nvlist_t *top, nvlist_t *draidcfg)
 static struct vdev_draid_configuration *
 vdev_draid_config_create(vdev_t *vd)
 {
-/*
- * HH: should probably allocate draid_zero_page page aligned, when need to deal
- * with ashift larger than a page
- */
-#ifdef _KERNEL
-#define	draid_zero_page empty_zero_page
-#else
-static char draid_zero_page[PAGE_SIZE];
-#endif
-
 	int i, j;
 	uint_t c;
 	uint64_t children;
@@ -922,9 +912,7 @@ static char draid_zero_page[PAGE_SIZE];
 		for (j = 0; j < children; j++)
 			base_perms[i * children + j] = perms[i * children + j];
 	cfg->dcf_base_perms = base_perms;
-
-	ASSERT3U(1ULL << vd->vdev_top->vdev_ashift, <=, PAGE_SIZE);
-	cfg->dcf_zero_abd = abd_get_from_buf(draid_zero_page, PAGE_SIZE);
+	cfg->dcf_zero_abd = NULL;
 	return (cfg);
 }
 
@@ -973,11 +961,16 @@ vdev_draid_open(vdev_t *vd, uint64_t *asize, uint64_t *max_asize,
 		*ashift = MAX(*ashift, cvd->vdev_ashift);
 	}
 
+	if (cfg->dcf_zero_abd == NULL) {
+		size_t size = 1ULL << *ashift;
+
+		cfg->dcf_zero_abd = abd_alloc_linear(size, B_TRUE);
+		abd_zero(cfg->dcf_zero_abd, size);
+	}
+
 	/* HH: asize becomes tricky with hybrid mirror */
 	*asize *= vd->vdev_children - cfg->dcf_spare;
 	*max_asize *= vd->vdev_children - cfg->dcf_spare;
-	/* HH: because of the draid_zero_page array */
-	ASSERT3U(*ashift, <=, PAGE_SHIFT);
 
 	if (numerrors > nparity) {
 		vd->vdev_stat.vs_aux = VDEV_AUX_NO_REPLICAS;
@@ -999,7 +992,8 @@ vdev_draid_close(vdev_t *vd)
 	if (vd->vdev_reopening || cfg == NULL)
 		return;
 
-	abd_put(cfg->dcf_zero_abd);
+	ASSERT(cfg->dcf_zero_abd != NULL);
+	abd_free(cfg->dcf_zero_abd);
 	kmem_free((void *)cfg->dcf_base_perms,
 	    sizeof (uint64_t) * cfg->dcf_bases * cfg->dcf_children);
 	kmem_free(cfg, sizeof (*cfg));
@@ -1287,7 +1281,7 @@ vdev_draid_hide_skip_sectors(raidz_map_t *rm)
 		ASSERT0(rc->rc_tried);
 		ASSERT0(rc->rc_skipped);
 		ASSERT(rc->rc_abd == NULL);
-		ASSERT3U(1ULL << vd->vdev_top->vdev_ashift, >=, size);
+		ASSERT3U(cfg->dcf_zero_abd->abd_size, >=, size);
 
 		rc->rc_size = size;
 		rc->rc_abd = cfg->dcf_zero_abd;
