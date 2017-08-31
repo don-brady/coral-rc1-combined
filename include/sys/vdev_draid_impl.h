@@ -80,12 +80,9 @@ extern uint64_t vdev_draid_max_rebuildable_asize(vdev_t *, uint64_t);
 #define	DVA_GET_DRAID_MIRROR(dva)	BF64_GET((dva)->dva_word[0], 31, 1)
 #define	DVA_SET_DRAID_MIRROR(dva, x)	BF64_SET((dva)->dva_word[0], 31, 1, x)
 
-/* trace_printk is GPL only */
-#undef	DRAID_USE_TRACE_PRINTK
-
 #ifdef _KERNEL
 #define	U64FMT "%llu"
-#ifdef DRAID_USE_TRACE_PRINTK
+#ifdef ZFS_IS_GPL_COMPATIBLE
 #define	draid_print(fmt, ...) trace_printk(fmt, ##__VA_ARGS__)
 #else
 #define	draid_print(fmt, ...) printk(fmt, ##__VA_ARGS__)

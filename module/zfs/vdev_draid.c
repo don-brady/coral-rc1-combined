@@ -755,7 +755,7 @@ vdev_draid_config_validate(const vdev_t *vd, nvlist_t *config)
 	}
 
 	if (n - 1 > VDEV_DRAID_U8_MAX) {
-		draid_dbg(0, "%s configuration too invalid: "U64FMT"\n",
+		draid_dbg(0, "%s configuration too large: "U64FMT"\n",
 		    ZPOOL_CONFIG_DRAIDCFG_CHILDREN, n);
 		return (B_FALSE);
 	}
@@ -878,14 +878,70 @@ vdev_draid_config_add(nvlist_t *top, nvlist_t *draidcfg)
 	return (B_TRUE);
 }
 
+/* Unfortunately this requires GPL-only symbols */
+#ifdef ZFS_IS_GPL_COMPATIBLE
+#define __DRAID_HARDENING
+#else
+#undef __DRAID_HARDENING
+#endif
+
+static void
+vdev_draid_setup_page(const void *start, size_t sz, boolean_t readonly)
+{
+#ifdef __DRAID_HARDENING
+	ASSERT(sz != 0);
+
+	if (!IS_P2ALIGNED(sz, PAGESIZE) || !IS_P2ALIGNED(start, PAGESIZE)) {
+		draid_dbg(1, "Buffer not page aligned %p %lu\n", start, sz);
+		return;
+	}
+
+#ifdef _KERNEL
+	if (readonly)
+		set_memory_ro((unsigned long)start, sz >> PAGE_SHIFT);
+	else
+		set_memory_rw((unsigned long)start, sz >> PAGE_SHIFT);
+#endif
+#endif
+}
+
+static inline void
+vdev_draid_set_mem_ro(const void *start, size_t sz)
+{
+	vdev_draid_setup_page(start, sz, B_TRUE);
+}
+
+static inline void
+vdev_draid_set_mem_rw(const void *start, size_t sz)
+{
+	vdev_draid_setup_page(start, sz, B_FALSE);
+}
+
+static uint64_t *
+vdev_draid_create_base_perms(const uint8_t *perms,
+    const struct vdev_draid_configuration *cfg)
+{
+	int i, j;
+	uint64_t children = cfg->dcf_children, *base_perms;
+	size_t sz = sizeof (uint64_t) * cfg->dcf_bases * children;
+
+#ifdef __DRAID_HARDENING
+	sz = P2ROUNDUP(sz, PAGESIZE);
+#endif
+	base_perms = kmem_alloc(sz, KM_SLEEP);
+	for (i = 0; i < cfg->dcf_bases; i++)
+		for (j = 0; j < children; j++)
+			base_perms[i * children + j] = perms[i * children + j];
+
+	vdev_draid_set_mem_ro(base_perms, sz);
+	return (base_perms);
+}
+
 static struct vdev_draid_configuration *
 vdev_draid_config_create(vdev_t *vd)
 {
-	int i, j;
 	uint_t c;
-	uint64_t children;
 	uint8_t *perms = NULL;
-	uint64_t *base_perms;
 	nvlist_t *nvl = vd->vdev_cfg;
 	struct vdev_draid_configuration *cfg;
 
@@ -907,11 +963,7 @@ vdev_draid_config_create(vdev_t *vd)
 	VERIFY0(nvlist_lookup_uint8_array(nvl,
 	    ZPOOL_CONFIG_DRAIDCFG_PERM, &perms, &c));
 
-	base_perms = kmem_alloc(sizeof (uint64_t) * c, KM_SLEEP);
-	for (i = 0, children = cfg->dcf_children; i < cfg->dcf_bases; i++)
-		for (j = 0; j < children; j++)
-			base_perms[i * children + j] = perms[i * children + j];
-	cfg->dcf_base_perms = base_perms;
+	cfg->dcf_base_perms = vdev_draid_create_base_perms(perms, cfg);
 	cfg->dcf_zero_abd = NULL;
 	return (cfg);
 }
@@ -962,10 +1014,16 @@ vdev_draid_open(vdev_t *vd, uint64_t *asize, uint64_t *max_asize,
 	}
 
 	if (cfg->dcf_zero_abd == NULL) {
-		size_t size = 1ULL << *ashift;
+		abd_t *zabd;
+		size_t sz = 1ULL << *ashift;
 
-		cfg->dcf_zero_abd = abd_alloc_linear(size, B_TRUE);
-		abd_zero(cfg->dcf_zero_abd, size);
+#ifdef __DRAID_HARDENING
+		sz = P2ROUNDUP(sz, PAGESIZE);
+#endif
+		zabd = abd_alloc_linear(sz, B_TRUE);
+		abd_zero(zabd, sz);
+		vdev_draid_set_mem_ro(abd_to_buf(zabd), sz);
+		cfg->dcf_zero_abd = zabd;
 	}
 
 	/* HH: asize becomes tricky with hybrid mirror */
@@ -984,6 +1042,8 @@ static void
 vdev_draid_close(vdev_t *vd)
 {
 	int c;
+	size_t sz;
+	abd_t *zabd;
 	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 
 	for (c = 0; c < vd->vdev_children; c++)
@@ -992,10 +1052,18 @@ vdev_draid_close(vdev_t *vd)
 	if (vd->vdev_reopening || cfg == NULL)
 		return;
 
-	ASSERT(cfg->dcf_zero_abd != NULL);
-	abd_free(cfg->dcf_zero_abd);
-	kmem_free((void *)cfg->dcf_base_perms,
-	    sizeof (uint64_t) * cfg->dcf_bases * cfg->dcf_children);
+	zabd = cfg->dcf_zero_abd;
+	ASSERT(zabd != NULL);
+	vdev_draid_set_mem_rw(abd_to_buf(zabd), zabd->abd_size);
+	abd_free(zabd);
+
+	sz = sizeof (uint64_t) * cfg->dcf_bases * cfg->dcf_children;
+#ifdef __DRAID_HARDENING
+	sz = P2ROUNDUP(sz, PAGESIZE);
+#endif
+	vdev_draid_set_mem_rw(cfg->dcf_base_perms, sz);
+	kmem_free((void *)cfg->dcf_base_perms, sz);
+
 	kmem_free(cfg, sizeof (*cfg));
 	vd->vdev_tsd = NULL;
 }
