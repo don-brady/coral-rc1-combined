@@ -206,7 +206,7 @@ while [[ $timeout -eq 0 ]] || [[ $curtime -le $((starttime + timeout)) ]]; do
 	# 25% basic, 25% raidz mix, and 50% draid mix
 	choice=$((RANDOM % 4))
 
-	align=$(((RANDOM % 2) * 3 + 9))
+	align=$(((RANDOM % 5 ) + 9))
 	size=128m
 
 	if [[ $choice -eq 0 ]]; then
@@ -227,7 +227,6 @@ while [[ $timeout -eq 0 ]] || [[ $curtime -le $((starttime + timeout)) ]]; do
 		# mix of draid fixed (one per parity) and fully random
 		mirrors=0
 		raidz=1
-		align=12
 		case $((RANDOM % 4)) in
 		0 )	# draid1: 3 x (4 + 1) + 1 = 16 drives
 			parity=1

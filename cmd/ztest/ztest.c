@@ -908,8 +908,6 @@ process_options(int argc, char **argv)
 		/* Use more appropriate defaults for dRAID */
 		if (zo->zo_vdevs == ztest_opts_defaults.zo_vdevs)
 			zo->zo_vdevs = 1;
-		if (zo->zo_ashift < 12)
-			zo->zo_ashift = 12;
 		if (zo->zo_vdev_size < min_devsize)
 			zo->zo_vdev_size = min_devsize;
 
