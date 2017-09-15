@@ -30,42 +30,44 @@
 #include <sys/vdev_scan.h>
 #include <sys/zio.h>
 #include <sys/dmu_tx.h>
+#include <sys/arc.h>
 
 static void
 spa_vdev_scan_done(zio_t *zio)
 {
 	spa_t *spa = zio->io_spa;
 	dsl_scan_t *scn = spa->spa_dsl_pool->dp_scan;
+	spa_vdev_scan_t *svs = zio->io_private;
 	uint64_t asize;
 
+	ASSERT(svs != NULL);
+	ASSERT(svs->svs_thread != NULL);
 	ASSERT(zio->io_bp != NULL);
 
 	abd_free(zio->io_abd);
 	asize = DVA_GET_ASIZE(&zio->io_bp->blk_dva[0]);
 
-	mutex_enter(&spa->spa_scrub_lock);
-
 	scn->scn_phys.scn_examined += asize;
 	spa->spa_scan_pass_exam += asize;
-
-	spa->spa_scrub_inflight--;
-	cv_broadcast(&spa->spa_scrub_io_cv);
 
 	if (zio->io_error && (zio->io_error != ECKSUM ||
 	    !(zio->io_flags & ZIO_FLAG_SPECULATIVE))) {
 		spa->spa_dsl_pool->dp_scan->scn_phys.scn_errors++;
 	}
 
-	mutex_exit(&spa->spa_scrub_lock);
+	mutex_enter(&svs->svs_io_lock);
+	ASSERT3U(svs->svs_io_asize, >=, asize);
+	svs->svs_io_asize -= asize;
+	cv_broadcast(&svs->svs_io_cv);
+	mutex_exit(&svs->svs_io_lock);
 }
 
-static int spa_vdev_scan_max_rebuild = 512;
 static int spa_vdev_scan_delay = 64; /* number of ticks to delay rebuild */
 static int spa_vdev_scan_idle = 512; /* idle window in clock ticks */
 
 static void
-spa_vdev_scan_rebuild_block(zio_t *pio, vdev_t *vd,
-    uint64_t offset, uint64_t asize)
+spa_vdev_scan_rebuild_block(spa_vdev_scan_t *svs, zio_t *pio,
+    vdev_t *vd, uint64_t offset, uint64_t asize)
 {
 	blkptr_t blk, *bp = &blk;
 	dva_t *dva = bp->blk_dva;
@@ -123,17 +125,23 @@ spa_vdev_scan_rebuild_block(zio_t *pio, vdev_t *vd,
 	BP_SET_DEDUP(bp, 0);
 	BP_SET_BYTEORDER(bp, ZFS_HOST_BYTEORDER);
 
-	zfs_scan_delay(spa, vd,
-	    spa_vdev_scan_max_rebuild, delay, spa_vdev_scan_idle);
+	mutex_enter(&svs->svs_io_lock);
+	while (svs->svs_io_asize >=
+	    MIN(arc_max_bytes(), 4 * SPA_MAXBLOCKSIZE * vd->vdev_children))
+		cv_wait(&svs->svs_io_cv, &svs->svs_io_lock);
+	svs->svs_io_asize += asize;
+	mutex_exit(&svs->svs_io_lock);
+
+	zfs_scan_delay(spa, vd, 0, delay, spa_vdev_scan_idle);
 
 	zio_nowait(zio_read(pio, spa, bp,
-	    abd_alloc(psize, B_FALSE), psize, spa_vdev_scan_done, NULL,
+	    abd_alloc(psize, B_FALSE), psize, spa_vdev_scan_done, svs,
 	    ZIO_PRIORITY_SCRUB, ZIO_FLAG_SCAN_THREAD | ZIO_FLAG_RAW |
 	    ZIO_FLAG_CANFAIL | ZIO_FLAG_RESILVER, NULL));
 }
 
 static void
-spa_vdev_scan_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
+spa_vdev_scan_rebuild(spa_vdev_scan_t *svs, zio_t *pio,
     vdev_t *vd, uint64_t offset, uint64_t length)
 {
 	uint64_t max_asize;
@@ -146,7 +154,7 @@ spa_vdev_scan_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
 	while (length > 0 && !svs->svs_thread_exit) {
 		uint64_t chunksz = MIN(length, max_asize);
 
-		spa_vdev_scan_rebuild_block(pio, vd, offset, chunksz);
+		spa_vdev_scan_rebuild_block(svs, pio, vd, offset, chunksz);
 
 		length -= chunksz;
 		offset += chunksz;
@@ -154,7 +162,7 @@ spa_vdev_scan_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
 }
 
 static void
-spa_vdev_scan_draid_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
+spa_vdev_scan_draid_rebuild(spa_vdev_scan_t *svs, zio_t *pio,
     vdev_t *vd, vdev_t *oldvd, uint64_t offset, uint64_t length)
 {
 	uint64_t msi = offset >> vd->vdev_ms_shift;
@@ -190,10 +198,8 @@ spa_vdev_scan_draid_rebuild(const spa_vdev_scan_t *svs, zio_t *pio,
 
 			action = "Skipping";
 
-			mutex_enter(&spa->spa_scrub_lock);
 			scn->scn_phys.scn_examined += chunksz;
 			spa->spa_scan_pass_exam += chunksz;
-			mutex_exit(&spa->spa_scrub_lock);
 		}
 
 		draid_dbg(3, "\t%s: "U64FMT"K + "U64FMT"K (%s)\n",
@@ -424,6 +430,9 @@ spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, int msi, uint64_t txg)
 	svs->svs_ms_done = NULL;
 	mutex_init(&svs->svs_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&svs->svs_cv, NULL, CV_DEFAULT, NULL);
+	svs->svs_io_asize = 0;
+	mutex_init(&svs->svs_io_lock, NULL, MUTEX_DEFAULT, NULL);
+	cv_init(&svs->svs_io_cv, NULL, CV_DEFAULT, NULL);
 	ASSERT3P(spa->spa_vdev_scan, ==, NULL);
 	spa->spa_vdev_scan = svs;
 	svs->svs_thread = thread_create(NULL, 0, spa_vdev_scan_thread, oldvd,
@@ -520,15 +529,6 @@ spa_vdev_scan_rebuild_cb(dsl_pool_t *dp,
 	return (-ENOTSUP);
 }
 
-boolean_t
-spa_vdev_scan_enabled(const spa_t *spa)
-{
-	if (spa_vdev_scan_max_rebuild > 0)
-		return (B_TRUE);
-	else
-		return (B_FALSE);
-}
-
 void
 spa_vdev_scan_destroy(spa_t *spa)
 {
@@ -539,10 +539,13 @@ spa_vdev_scan_destroy(spa_t *spa)
 
 	ASSERT3P(svs->svs_thread, ==, NULL);
 	ASSERT3P(svs->svs_ms_done, ==, NULL);
+	ASSERT3U(svs->svs_io_asize, ==, 0);
 
 	spa->spa_vdev_scan = NULL;
 	mutex_destroy(&svs->svs_lock);
 	cv_destroy(&svs->svs_cv);
+	mutex_destroy(&svs->svs_io_lock);
+	cv_destroy(&svs->svs_io_cv);
 	kmem_free(svs, sizeof (*svs));
 }
 
@@ -562,9 +565,6 @@ spa_vdev_scan_suspend(spa_t *spa)
 }
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
-module_param(spa_vdev_scan_max_rebuild, int, 0644);
-MODULE_PARM_DESC(spa_vdev_scan_max_rebuild, "Max concurrent SPA rebuild I/Os");
-
 module_param(spa_vdev_scan_delay, int, 0644);
 MODULE_PARM_DESC(spa_vdev_scan_delay, "Number of ticks to delay SPA rebuild");
 

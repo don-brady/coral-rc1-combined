@@ -4961,9 +4961,8 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	 */
 	vdev_dirty(tvd, VDD_DTL, newvd, txg);
 
-	if (spa_vdev_scan_enabled(spa) &&
-	    ((tvd->vdev_ops == &vdev_mirror_ops && spa_rebuild_mirror != 0) ||
-	    newvd->vdev_ops == &vdev_draid_spare_ops))
+	if (newvd->vdev_ops == &vdev_draid_spare_ops ||
+	    (tvd->vdev_ops == &vdev_mirror_ops && spa_rebuild_mirror != 0))
 		rebuild = B_TRUE; /* HH: let zpool cmd choose */
 
 	/*

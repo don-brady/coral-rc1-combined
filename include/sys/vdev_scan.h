@@ -44,9 +44,12 @@ typedef struct spa_vdev_scan {
 	int		svs_msi;
 	int		svs_msi_synced;
 	int		*svs_ms_done;
+
+	kmutex_t	svs_io_lock;
+	kcondvar_t	svs_io_cv;
+	uint64_t	svs_io_asize;
 } spa_vdev_scan_t;
 
-extern boolean_t spa_vdev_scan_enabled(const spa_t *);
 extern void spa_vdev_scan_setup_sync(dmu_tx_t *);
 extern void spa_vdev_scan_start(spa_t *, vdev_t *, int, uint64_t);
 extern int spa_vdev_scan_restart(vdev_t *);
