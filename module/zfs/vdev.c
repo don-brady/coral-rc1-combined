@@ -526,6 +526,13 @@ vdev_alloc(spa_t *spa, vdev_t **vdp, nvlist_t *nv, vdev_t *parent, uint_t id,
 			return (SET_ERROR(EINVAL));
 		if (!vdev_draid_config_validate(NULL, draidcfg))
 			return (SET_ERROR(EINVAL));
+		if (alloctype == VDEV_ALLOC_ADD &&
+		    spa->spa_load_state != SPA_LOAD_CREATE &&
+		    !spa_feature_is_enabled(spa, SPA_FEATURE_DRAID)) {
+			cmn_err(CE_WARN, "pool '%s' adding a dRAID "
+			    "VDEV requires feature@draid", spa_name(spa));
+			return (SET_ERROR(EINVAL));
+		}
 	}
 
 	/*

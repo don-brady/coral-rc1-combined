@@ -3953,7 +3953,7 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	uint64_t version, obj;
 	boolean_t has_features;
 	nvpair_t *elem;
-	int c, i;
+	int c, i, draid = 0;
 	char *poolname;
 	nvlist_t *nvl;
 
@@ -4051,6 +4051,9 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 
 			vdev_metaslab_set_size(vd);
 			vdev_expand(vd, txg);
+
+			if (vd->vdev_ops == &vdev_draid_ops)
+				draid++;
 		}
 	}
 
@@ -4188,6 +4191,9 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 	    spa_feature_is_enabled(spa, SPA_FEATURE_ALLOCATION_CLASSES)) {
 		spa_feature_incr(spa, SPA_FEATURE_ALLOCATION_CLASSES, tx);
 	}
+
+	for (i = 0; i < draid; i++)
+		spa_feature_incr(spa, SPA_FEATURE_DRAID, tx);
 
 	dmu_tx_commit(tx);
 
@@ -4669,7 +4675,7 @@ spa_vdev_add(spa_t *spa, nvlist_t *nvroot)
 	vdev_t *vd, *tvd;
 	nvlist_t **spares, **l2cache;
 	uint_t nspares, nl2cache;
-	int c;
+	int c, draid = 0;
 
 	ASSERT(spa_writeable(spa));
 
@@ -4722,6 +4728,20 @@ spa_vdev_add(spa_t *spa, nvlist_t *nvroot)
 		tvd->vdev_id = id;
 		vdev_add_child(rvd, tvd);
 		vdev_config_dirty(tvd);
+
+		if (tvd->vdev_ops == &vdev_draid_ops)
+			draid++;
+	}
+
+	if (draid != 0) {
+		dmu_tx_t *tx;
+
+		tx = dmu_tx_create_assigned(spa->spa_dsl_pool, txg);
+
+		for (c = 0; c < draid; c++)
+			spa_feature_incr(spa, SPA_FEATURE_DRAID, tx);
+
+		dmu_tx_commit(tx);
 	}
 
 	if (nspares != 0) {
