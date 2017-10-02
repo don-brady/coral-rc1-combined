@@ -331,11 +331,11 @@ vdev_draid_assert_vd(const vdev_t *vd)
 {
 	struct vdev_draid_configuration *cfg = vd->vdev_tsd;
 
-	ASSERT(cfg != NULL);
-	ASSERT(cfg->dcf_zero_abd != NULL);
 	ASSERT3P(vd->vdev_ops, ==, &vdev_draid_ops);
+	ASSERT(cfg != NULL);
 	ASSERT3U(vd->vdev_nparity, ==, cfg->dcf_parity);
 	ASSERT3U(vd->vdev_children, ==, cfg->dcf_children);
+	ASSERT(cfg->dcf_zero_abd != NULL);
 }
 
 uint64_t
@@ -1584,7 +1584,7 @@ vdev_dspare_open(vdev_t *vd, uint64_t *psize, uint64_t *max_psize,
 
 	cfg = draid->vdev_tsd;
 	ASSERT(cfg != NULL);
-	if (spare_id >= cfg->dcf_spare)
+	if (nparity != cfg->dcf_parity || spare_id >= cfg->dcf_spare)
 		return (SET_ERROR(EINVAL));
 
 	dspare = kmem_alloc(sizeof (*dspare), KM_SLEEP);
@@ -1593,8 +1593,6 @@ vdev_dspare_open(vdev_t *vd, uint64_t *psize, uint64_t *max_psize,
 	vd->vdev_tsd = dspare;
 
 skip_open:
-	vdev_draid_assert_vd(draid);
-
 	asize = draid->vdev_asize / (draid->vdev_children - cfg->dcf_spare);
 	max_asize = draid->vdev_max_asize /
 	    (draid->vdev_children - cfg->dcf_spare);
