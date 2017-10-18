@@ -844,6 +844,7 @@ vdev_top_transfer(vdev_t *svd, vdev_t *tvd)
 	int t;
 
 	ASSERT(tvd == tvd->vdev_top);
+	ASSERT(svd->vdev_ops != &vdev_draid_ops);
 
 	tvd->vdev_pending_fastwrite = svd->vdev_pending_fastwrite;
 	tvd->vdev_ms_array = svd->vdev_ms_array;
