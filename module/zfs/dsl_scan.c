@@ -1732,7 +1732,7 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 
 			spa_vdev_scan_destroy(spa);
 			svs = NULL;
-		} else if (msi > SPA_VDEV_SCAN_MS(scn)) {
+		} else if (msi == -1 || msi > SPA_VDEV_SCAN_MS(scn)) {
 			SPA_VDEV_SCAN_MS(scn) = msi;
 			dsl_scan_sync_state(scn, tx);
 		}
