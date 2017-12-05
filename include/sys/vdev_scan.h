@@ -34,7 +34,14 @@
 extern "C" {
 #endif
 
+typedef struct spa_rebuilding_phys {
+	uint64_t sr_vdev;
+	uint64_t sr_oldvd;
+	int64_t	 sr_ms;
+} spa_rebuilding_phys_t;
+
 typedef struct spa_vdev_scan {
+	dsl_pool_t	*svs_dp;
 	vdev_t		*svs_vd;
 	kthread_t	*svs_thread;
 	kmutex_t	svs_lock;
@@ -48,6 +55,8 @@ typedef struct spa_vdev_scan {
 	kmutex_t	svs_io_lock;
 	kcondvar_t	svs_io_cv;
 	uint64_t	svs_io_asize;
+
+	spa_rebuilding_phys_t svs_phys;
 } spa_vdev_scan_t;
 
 extern void spa_vdev_scan_setup_sync(dmu_tx_t *);
@@ -57,11 +66,10 @@ extern int spa_vdev_scan_rebuild_cb(dsl_pool_t *,
     const blkptr_t *, const zbookmark_phys_t *);
 extern void spa_vdev_scan_suspend(spa_t *);
 extern void spa_vdev_scan_destroy(spa_t *);
+extern void spa_vdev_scan_sync_state(spa_vdev_scan_t *, dmu_tx_t *);
 
-#define	DSL_SCAN_IS_REBUILD(scn)((scn)->scn_phys.scn_func == POOL_SCAN_REBUILD)
-#define	SPA_VDEV_SCAN_MS(scn)	((scn)->scn_phys.scn_bookmark.zb_level)
-#define	SPA_VDEV_SCAN_TVD(scn)	((scn)->scn_phys.scn_bookmark.zb_objset)
-#define	SPA_VDEV_SCAN_OLDVD(scn)((scn)->scn_phys.scn_bookmark.zb_object)
+#define	DSL_SCAN_IS_REBUILD(scn) ((scn)->scn_phys.scn_func == POOL_SCAN_REBUILD)
+
 
 #ifdef	__cplusplus
 }

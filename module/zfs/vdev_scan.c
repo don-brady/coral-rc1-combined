@@ -31,6 +31,7 @@
 #include <sys/zio.h>
 #include <sys/dmu_tx.h>
 #include <sys/arc.h>
+#include <sys/zap.h>
 
 static void
 spa_vdev_scan_done(zio_t *zio)
@@ -428,6 +429,7 @@ spa_vdev_scan_start(spa_t *spa, vdev_t *oldvd, int msi, uint64_t txg)
 	svs->svs_dtl_max = txg;
 	svs->svs_thread = NULL;
 	svs->svs_ms_done = NULL;
+	svs->svs_dp = spa->spa_dsl_pool;
 	mutex_init(&svs->svs_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&svs->svs_cv, NULL, CV_DEFAULT, NULL);
 	svs->svs_io_asize = 0;
@@ -446,26 +448,32 @@ spa_vdev_scan_restart(vdev_t *rvd)
 {
 	spa_t *spa = rvd->vdev_spa;
 	dsl_scan_t *scn = spa->spa_dsl_pool->dp_scan;
+	spa_rebuilding_phys_t svs_phys;
+	int err;
 	vdev_t *tvd, *oldvd, *pvd, *dspare;
 
 	ASSERT(scn != NULL);
 	ASSERT3P(spa->spa_vdev_scan, ==, NULL);
 
-	if (!DSL_SCAN_IS_REBUILD(scn) ||
+	err = zap_lookup(spa->spa_dsl_pool->dp_meta_objset,
+	    DMU_POOL_DIRECTORY_OBJECT, DMU_POOL_REBUILDING, sizeof (uint64_t),
+	    sizeof (spa_rebuilding_phys_t) / sizeof (uint64_t), &svs_phys);
+
+	if (err != 0 || !DSL_SCAN_IS_REBUILD(scn) ||
 	    scn->scn_phys.scn_state == DSS_FINISHED ||
-	    SPA_VDEV_SCAN_TVD(scn) == 0 || SPA_VDEV_SCAN_OLDVD(scn) == 0 ||
-	    SPA_VDEV_SCAN_MS(scn) < -1)
+	    svs_phys.sr_vdev == 0 || svs_phys.sr_oldvd == 0 ||
+	    svs_phys.sr_ms < -1)
 		return (SET_ERROR(ENOENT));
 
-	tvd = vdev_lookup_by_guid(rvd, SPA_VDEV_SCAN_TVD(scn));
-	oldvd = vdev_lookup_by_guid(rvd, SPA_VDEV_SCAN_OLDVD(scn));
+	tvd = vdev_lookup_by_guid(rvd, svs_phys.sr_vdev);
+	oldvd = vdev_lookup_by_guid(rvd, svs_phys.sr_oldvd);
 	if (tvd == NULL || oldvd == NULL || oldvd->vdev_top != tvd)
 		return (SET_ERROR(ENOENT));
 
 	if (tvd->vdev_ops != &vdev_draid_ops)
 		return (SET_ERROR(ENOTSUP));
 
-	if (SPA_VDEV_SCAN_MS(scn) >= tvd->vdev_ms_count - 1)
+	if (svs_phys.sr_ms >= tvd->vdev_ms_count - 1)
 		return (SET_ERROR(ENOENT));
 
 	pvd = oldvd->vdev_parent;
@@ -478,8 +486,8 @@ spa_vdev_scan_restart(vdev_t *rvd)
 		return (SET_ERROR(ENOENT));
 
 	draid_dbg(1, "Restarting rebuild at metaslab "U64FMT"\n",
-	    SPA_VDEV_SCAN_MS(scn) + 1);
-	spa_vdev_scan_start(spa, oldvd, SPA_VDEV_SCAN_MS(scn) + 1,
+	    svs_phys.sr_ms + 1);
+	spa_vdev_scan_start(spa, oldvd, svs_phys.sr_ms + 1,
 	    spa_last_synced_txg(spa) + 1 + TXG_CONCURRENT_STATES);
 	return (0);
 }
@@ -489,12 +497,13 @@ spa_vdev_scan_setup_sync(dmu_tx_t *tx)
 {
 	dsl_scan_t *scn = dmu_tx_pool(tx)->dp_scan;
 	spa_t *spa = scn->scn_dp->dp_spa;
+	spa_vdev_scan_t *svs = spa->spa_vdev_scan;
 	vdev_t *oldvd;
 
 	ASSERT(scn->scn_phys.scn_state != DSS_SCANNING);
-	ASSERT(spa->spa_vdev_scan != NULL);
+	ASSERT(svs != NULL);
 
-	oldvd = spa->spa_vdev_scan->svs_vd;
+	oldvd = svs->svs_vd;
 	bzero(&scn->scn_phys, sizeof (scn->scn_phys));
 	scn->scn_phys.scn_func = POOL_SCAN_REBUILD;
 	scn->scn_phys.scn_state = DSS_SCANNING;
@@ -505,9 +514,9 @@ spa_vdev_scan_setup_sync(dmu_tx_t *tx)
 	scn->scn_phys.scn_errors = 0;
 	/* Rebuild only examines blocks on one vdev */
 	scn->scn_phys.scn_to_examine = oldvd->vdev_top->vdev_stat.vs_alloc;
-	SPA_VDEV_SCAN_MS(scn) = -1;
-	SPA_VDEV_SCAN_TVD(scn) = oldvd->vdev_top->vdev_guid;
-	SPA_VDEV_SCAN_OLDVD(scn) = oldvd->vdev_guid;
+	svs->svs_phys.sr_ms = -1;
+	svs->svs_phys.sr_vdev = oldvd->vdev_top->vdev_guid;
+	svs->svs_phys.sr_oldvd = oldvd->vdev_guid;
 
 	scn->scn_restart_txg = 0;
 	scn->scn_done_txg = 0;
@@ -562,6 +571,16 @@ spa_vdev_scan_suspend(spa_t *spa)
 	while (svs->svs_thread != NULL)
 		cv_wait(&svs->svs_cv, &svs->svs_lock);
 	mutex_exit(&svs->svs_lock);
+}
+
+void
+spa_vdev_scan_sync_state(spa_vdev_scan_t *svs, dmu_tx_t *tx)
+{
+	VERIFY0(zap_update(svs->svs_dp->dp_meta_objset,
+	    DMU_POOL_DIRECTORY_OBJECT,
+	    DMU_POOL_REBUILDING, sizeof (uint64_t),
+	    sizeof (spa_rebuilding_phys_t) / sizeof (uint64_t),
+	    &svs->svs_phys, tx));
 }
 
 #if defined(_KERNEL) && defined(HAVE_SPL)

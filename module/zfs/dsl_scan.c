@@ -1723,18 +1723,23 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 			if (complete) {
 				ASSERT3U(msi + 1, ==,
 				    svs->svs_vd->vdev_top->vdev_ms_count);
-				SPA_VDEV_SCAN_MS(scn) = -1;
-				SPA_VDEV_SCAN_TVD(scn) = 0;
-				SPA_VDEV_SCAN_OLDVD(scn) = 0;
+				svs->svs_phys.sr_ms = -1;
+				svs->svs_phys.sr_vdev = 0;
+				svs->svs_phys.sr_oldvd = 0;
 			}
 			dsl_scan_done(scn, complete, tx);
+			/* HH: remove calls to dsl_scan_sync_state() here and
+			 * below, when states shared with DSL scan are removed
+			 */
 			dsl_scan_sync_state(scn, tx);
+			spa_vdev_scan_sync_state(svs, tx);
 
 			spa_vdev_scan_destroy(spa);
 			svs = NULL;
-		} else if (msi == -1 || msi > SPA_VDEV_SCAN_MS(scn)) {
-			SPA_VDEV_SCAN_MS(scn) = msi;
+		} else if (msi == -1 || msi > svs->svs_phys.sr_ms) {
+			svs->svs_phys.sr_ms = msi;
 			dsl_scan_sync_state(scn, tx);
+			spa_vdev_scan_sync_state(svs, tx);
 		}
 		/* Rebuild is mostly handled in the open-context scan thread */
 		return;
